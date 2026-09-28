@@ -25,6 +25,8 @@
       <span id="status-pill" class="pill" role="status">Checking…</span>
       <label class="sr-only" for="mode">Mode</label>
       <select id="mode"><option value="sample">Sample data</option><option value="live">Live</option></select>
+      <button class="btn" id="export-py" title="Download this diagram as a readable Python script">Export Python</button>
+      <button class="btn" id="evals">Evals</button>
       <button class="btn" id="inbox">Inbox (0)</button>
       <button class="btn primary" id="run">▷ Run</button>
     </div>
@@ -78,6 +80,7 @@
   </section>
 </div>
 <section class="inbox-panel" id="inbox-panel" aria-label="Approval inbox" hidden></section>
+<section class="inbox-panel evals-panel" id="evals-panel" aria-label="Evals" hidden></section>
 <div id="toast" role="status" aria-live="polite" hidden></div>
 </body>
 </html>

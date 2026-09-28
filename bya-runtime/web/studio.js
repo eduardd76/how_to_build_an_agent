@@ -49,6 +49,8 @@ function setDiagram(doc) {
   diagram.blocks.forEach((b, i) => { b.config = b.config || {}; diagram.layout[b.id] ??= freeSpot(i); });
   $('#diagram-name').value = diagram.name;
   selected = null;
+  evalReport = null;
+  if (!$('#evals-panel').hidden) renderEvals();
   renderAll();
   changed();
 }
@@ -494,6 +496,78 @@ async function decide(approved) {
   finally { $('#approve').disabled = $('#reject').disabled = false; }
 }
 
+// ---------- evals: test cases stored in the diagram ----------
+const EXPECT_LISTS = [['contains', 'Draft must contain'], ['not_contains', 'Draft must not contain'],
+  ['tools_called', 'Tools that must be called'], ['tools_not_called', 'Tools that must not be called'], ['cites_any', 'Must cite one of']];
+let evalReport = null, evalExport = false;
+
+function triggerType() { return diagram.blocks.find(b => category(b) === 'trigger')?.type; }
+function caseHtml(c, i) {
+  const t = triggerType(), e = c.expect || {};
+  const input = t === 'trigger.alert'
+    ? `<div class="field"><label for="ev-${i}-alert">Alert message (empty = sample alert)</label><input id="ev-${i}-alert" data-k="alert" value="${esc(c.alert?.message || '')}"></div>`
+    : `<div class="field"><label for="ev-${i}-input">Input</label><textarea id="ev-${i}-input" data-k="input" rows="2">${esc(typeof c.input === 'string' ? c.input : c.input ? JSON.stringify(c.input) : '')}</textarea></div>`;
+  return `<details ${evalReport ? '' : 'open'} data-i="${i}"><summary>${esc(c.id)}</summary>
+    <div class="field"><label for="ev-${i}-id">Name</label><input id="ev-${i}-id" data-k="id" value="${esc(c.id)}"></div>
+    ${input}
+    <div class="field"><label for="ev-${i}-status">Expected result</label><select id="ev-${i}-status" data-k="status">
+      ${[['awaiting_approval', 'Draft ready for approval'], ['blocked', 'Blocked by output check'], ['failed', 'Run fails']].map(([v, l]) => `<option value="${v}" ${(e.status || 'awaiting_approval') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    <div class="grid2">${EXPECT_LISTS.map(([k, l]) => `<div class="field"><label for="ev-${i}-${k}">${l}</label><textarea id="ev-${i}-${k}" data-k="${k}" rows="2" aria-describedby="ev-help">${esc((e[k] || []).join('\n'))}</textarea></div>`).join('')}</div>
+    <button class="btn small danger" data-remove="${i}">Remove case</button></details>`;
+}
+function readCase(el, old) {
+  const val = k => el.querySelector(`[data-k="${k}"]`)?.value ?? '';
+  const lines = k => val(k).split('\n').map(x => x.trim()).filter(Boolean);
+  const c = {id: val('id').trim() || old.id, expect: {status: val('status')}};
+  EXPECT_LISTS.forEach(([k]) => { const v = lines(k); if (v.length) c.expect[k] = v; });
+  if (el.querySelector('[data-k="alert"]')) { const m = val('alert').trim(); if (m) c.alert = {...(old.alert || {}), message: m}; }
+  else if (val('input').trim()) { const raw = val('input').trim(); try { c.input = triggerType() === 'trigger.webhook' ? JSON.parse(raw) : raw; } catch { c.input = raw; } }
+  return c;
+}
+function renderEvals() {
+  const box = $('#evals-panel'), cases = diagram.evals || [];
+  const rep = evalReport;
+  box.innerHTML = `<div class="run-head"><h2>Evals</h2>${rep ? `<span class="pill ${rep.passed === rep.total ? 'ok' : 'bad'}">${rep.passed}/${rep.total} passed</span>` : ''}
+      <button class="btn small" id="close-evals" aria-label="Close evals">×</button></div>
+    <p class="desc" id="ev-help">Each case runs the diagram up to the first approval. Write tools are denied and memory is isolated, so evals never change anything. One entry per line.</p>
+    ${rep ? `<ul class="results">${rep.results.map(r => `<li><span class="${r.passed ? 'pass' : 'fail'}">${r.passed ? 'PASS' : 'FAIL'}</span> ${esc(r.id)}${rep.results.some(x => x.run > 1) ? ` (run ${r.run})` : ''} · ${esc(r.status)}
+      ${r.passed ? '' : `<small>Failed: ${esc(Object.entries(r.checks).filter(([, v]) => !v).map(([k]) => k).join(', '))}${r.error ? ' · ' + esc(r.error) : ''}</small>`}
+      <small>Tools: ${esc(r.tools.join(', ') || 'none')}</small></li>`).join('')}</ul>
+      ${rep.export ? `<p class="desc">Exported Python: ${rep.export.passed}/${rep.export.total} passed · ${rep.export.matches ? 'matches the diagram' : '<strong>differs from the diagram</strong>'}</p>` : ''}` : ''}
+    <div id="ev-cases">${cases.map(caseHtml).join('') || '<p class="muted">No cases yet.</p>'}</div>
+    <div class="row"><button class="btn" id="ev-add">Add case</button>
+      <label class="sr-only" for="ev-repeat">Runs per case</label><select id="ev-repeat"><option value="1">1 run per case</option><option value="3">3 runs per case</option></select>
+      <label class="check-row"><input type="checkbox" id="ev-export" ${evalExport ? 'checked' : ''}> Also test the Python export</label>
+      <button class="btn primary" id="ev-run">Run evals</button></div>`;
+  const sync = () => {
+    diagram.evals = [...box.querySelectorAll('#ev-cases details')].map(el => readCase(el, cases[Number(el.dataset.i)]));
+    save();
+  };
+  box.querySelectorAll('#ev-cases input, #ev-cases textarea, #ev-cases select').forEach(el => el.addEventListener('change', sync));
+  box.querySelectorAll('[data-remove]').forEach(btn => btn.addEventListener('click', () => { sync(); diagram.evals.splice(Number(btn.dataset.remove), 1); save(); renderEvals(); }));
+  $('#ev-add').onclick = () => { sync(); let n = (diagram.evals || []).length + 1; while ((diagram.evals || []).some(c => c.id === 'case-' + n)) n++; (diagram.evals ??= []).push({id: 'case-' + n, expect: {status: 'awaiting_approval'}}); save(); renderEvals(); };
+  $('#ev-export').onchange = e => { evalExport = e.target.checked; };
+  $('#close-evals').onclick = () => { box.hidden = true; };
+  $('#ev-run').onclick = async () => {
+    sync();
+    const btn = $('#ev-run'); btn.disabled = true; btn.textContent = 'Running…';
+    try {
+      const res = await api('/api/diagram/eval', {diagram, mode: $('#mode').value, repeat: Number($('#ev-repeat').value), compare_export: $('#ev-export').checked});
+      if (res.status === 'invalid') { toast('Fix the diagram problems first.'); violations = res.violations; renderProblems(); renderBlocks(); }
+      else { evalReport = res; renderEvals(); }
+    } catch (e) { toast(e.message); btn.disabled = false; btn.textContent = 'Run evals'; }
+  };
+}
+async function exportPython() {
+  try {
+    const res = await api('/api/diagram/export', {diagram});
+    const url = URL.createObjectURL(new Blob([res.source], {type: 'text/x-python'}));
+    const a = document.createElement('a'); a.href = url; a.download = res.filename; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast(`Exported ${res.filename}. It owns the flow and the agent loop; edit it freely.`);
+  } catch (e) { toast(e.message); }
+}
+
 // ---------- files ----------
 function download(name, text) {
   const url = URL.createObjectURL(new Blob([text], {type: 'application/json'}));
@@ -546,6 +620,8 @@ async function init() {
   $('#mode').onchange = () => changed();
   $('#run').onclick = runDiagram;
   $('#inbox').onclick = openInbox;
+  $('#evals').onclick = () => { const p = $('#evals-panel'); p.hidden = !p.hidden; if (!p.hidden) renderEvals(); };
+  $('#export-py').onclick = exportPython;
   refreshInbox();
   $('#approve').onclick = () => decide(true);
   $('#reject').onclick = () => decide(false);

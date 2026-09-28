@@ -98,6 +98,23 @@ LLM_MODEL=llama3.1:8b python -m bya.graph run diagrams/incident-brief.json   # a
 - Run history is written only for runs that completed, so blocked, rejected or failed drafts are never remembered.
 - Whatever is read back from memory is passed to the model as data.
 
+**Evals:**
+- Test cases live in the diagram file (`"evals"`), so they travel with it. **Evals** in the top bar edits and runs them.
+- A case gives an input or an alert, and what the draft must satisfy: `status`, `contains`, `not_contains`, `tools_called`, `tools_not_called`, `cites_any`.
+- Evals never act: every run stops at the first approval, write tools are denied, and memory and outputs are isolated per case.
+- Run each case up to 5 times to see how stable a model is.
+
+**Export to Python:**
+- **Export Python** downloads the diagram as one readable script: the settings, the flow as straight-line code, and a `run()` function.
+- The script uses the same runtime library, guardrails and approvals. It asks for approvals in the terminal.
+- Tick **Also test the Python export** in the evals panel to run the same cases against the script and confirm it behaves like the diagram.
+
+```sh
+python -m bya.graph eval diagrams/incident-brief.json --export      # diagram and export, same cases
+python -m bya.graph export diagrams/incident-brief.json -o agent.py
+python agent.py                                                      # needs BYA_RUNTIME if moved elsewhere
+```
+
 Current limit: MCP servers must be local (stdio); remote MCP isn't supported yet.
 
 **Imported diagrams can start local programs.** An MCP block runs its command when the diagram runs, and the studio shows that command on the block's settings panel. Only run diagrams and MCP servers you trust.

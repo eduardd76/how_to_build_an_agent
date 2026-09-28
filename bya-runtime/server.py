@@ -12,7 +12,9 @@ from pathlib import Path
 
 from bya import adapters, graph, pipeline, prompts, validation
 from bya.core import UTC, date
+from bya.graph import evals
 from bya.graph.catalog import catalog
+from bya.graph.export import export_python
 from bya.store import DiagramRunStore, RunStore
 
 ROOT = Path(__file__).resolve().parent
@@ -231,6 +233,36 @@ def diagram_approve(data):
     return {'id': rid, **state}
 
 
+def diagram_eval(data):
+    doc, mode = data.get('diagram'), _mode(data)
+    diagram = graph.load(doc)
+    cases = (doc or {}).get('evals') or []
+    if not cases:
+        raise ValueError('Add at least one eval case first.')
+    problems = graph.validate(diagram, mode)
+    if problems:
+        return {'status': 'invalid', 'violations': [v.to_dict() for v in problems]}
+    if not LOCK.acquire(blocking=False):
+        raise ValueError('Another run is active. Wait until it finishes.')
+    try:
+        ctx = _diagram_context(mode)
+        report = evals.run_evals(cases, evals.diagram_runner(diagram, ctx), data.get('repeat', 1))
+        if data.get('compare_export'):
+            module = evals.load_module(export_python(diagram), ROOT)
+            exported = evals.run_evals(cases, evals.module_runner(module, ctx.monitoring), data.get('repeat', 1))
+            report['export'] = {'passed': exported['passed'], 'total': exported['total'],
+                                'matches': [r['passed'] for r in report['results']] == [r['passed'] for r in exported['results']]}
+    finally:
+        LOCK.release()
+    return report
+
+
+def diagram_export(data):
+    diagram = graph.load(data.get('diagram'))
+    name = re.sub(r'[^a-z0-9]+', '-', diagram.name.lower()).strip('-') or 'agent'
+    return {'filename': f'{name[:50]}.py', 'source': export_python(diagram)}
+
+
 def diagram_save(data):
     name = str(data.get('file', ''))
     if not DIAGRAM_FILE.match(name):
@@ -245,7 +277,8 @@ def diagram_save(data):
 
 ROUTES = {'/api/assist': assist, '/api/ssot': save_ssot, '/api/run': run_agent, '/api/approve': approve,
           '/api/diagram/validate': diagram_validate, '/api/diagram/run': diagram_run,
-          '/api/diagram/approve': diagram_approve, '/api/diagram/save': diagram_save}
+          '/api/diagram/approve': diagram_approve, '/api/diagram/save': diagram_save,
+          '/api/diagram/eval': diagram_eval, '/api/diagram/export': diagram_export}
 
 
 if __name__ == '__main__':

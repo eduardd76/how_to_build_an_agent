@@ -4,9 +4,10 @@
     problems = validate(diagram, mode="sample")
     result = run(diagram, Context(...), payload)
 """
+from . import evals
 from .diagram import Diagram, DiagramError, load, load_file
 from .executor import Context, DiagramInvalid, StepFailed, resume, run
 from .validator import Violation, validate
 
-__all__ = ['Context', 'Diagram', 'DiagramError', 'DiagramInvalid', 'StepFailed', 'Violation',
+__all__ = ['evals', 'Context', 'Diagram', 'DiagramError', 'DiagramInvalid', 'StepFailed', 'Violation',
            'load', 'load_file', 'resume', 'run', 'validate']

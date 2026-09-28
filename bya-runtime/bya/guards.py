@@ -42,3 +42,36 @@ def check(text, allowed_runbooks, require_citation=False):
     if PROBABILITY.search(text):
         violations.append('States an outage probability; forecasts are metric estimates only.')
     return violations
+
+
+REDACTIONS = [
+    ('token', re.compile(r'(?i)\bbearer\s+[a-z0-9._~+/=-]{8,}')),
+    ('key', re.compile(r'\b(?:sk-[A-Za-z0-9_-]{16,}|xox[abpr]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}'
+                       r'|gh[pousr]_[A-Za-z0-9]{20,}|glpat-[A-Za-z0-9_-]{20,})')),
+    ('secret', re.compile(r'(?i)\b(password|passwd|secret|api[_-]?key|token)\s*[:=]\s*\S+')),
+]
+EMAIL = re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b')
+IPV4 = re.compile(r'\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b')
+
+
+def redact(text, emails=True, ipv4=False, patterns=()):
+    """Replace secrets (and optionally emails / IPv4 addresses / custom patterns). Returns (text, counts)."""
+    rules = list(REDACTIONS)
+    if emails:
+        rules.append(('email', EMAIL))
+    if ipv4:
+        rules.append(('ip', IPV4))
+    rules += [('pattern', re.compile(p)) for p in patterns]
+    counts = {}
+    for label, rx in rules:
+        text, n = rx.subn(f'[REDACTED {label}]', text)
+        if n:
+            counts[label] = counts.get(label, 0) + n
+    return text, counts
+
+
+def check_draft(text, allowed_citations=None, require_citation=False, block_patterns=()):
+    """Output check used by diagrams and exported agents: built-in rules plus extra blocked patterns."""
+    problems = check(str(text), allowed_citations, require_citation=require_citation)
+    problems += [f'Matches blocked pattern {p!r}.' for p in block_patterns if re.search(p, str(text), re.I)]
+    return problems

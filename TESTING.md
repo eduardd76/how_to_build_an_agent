@@ -28,7 +28,7 @@ python server.py
 
 Open `http://127.0.0.1:8787` and keep the terminal open.
 
-- [ ] 28 tests pass.
+- [ ] All tests pass (76 at the time of writing).
 - [ ] Evals: 8/8 pass (4 incident, 4 forecast).
 - [ ] **Incident brief** template → **Run test** with *Sample data*: the trace shows SSOT, Knowledge, Monitoring, Analysis, Output checks, Delivery policy.
 - [ ] **Capacity forecast** template → **Run test**: a chart appears and the draft starts with `[SAMPLE / trend baseline]`.
@@ -36,6 +36,8 @@ Open `http://127.0.0.1:8787` and keep the terminal open.
 - [ ] **Source of truth** view lists the 3 sample assets.
 - [ ] Open `http://127.0.0.1:8787/studio.html`. Choose **Start from… → Incident brief**; the status shows **Ready to run**.
 - [ ] Drag from the agent's right-hand port to the **Save to file** block. The canvas refuses, and explains that an output needs a check and an approval first.
+- [ ] Set the agent's model endpoint to your model, open **Evals**, tick **Also test the Python export** and click **Run evals**. Each case shows pass or fail per check, and the export line says whether it matches the diagram.
+- [ ] **Export Python** downloads `incident-brief.py`; `python incident-brief.py` runs it with approvals in the terminal.
 
 Stop the server with `Ctrl+C`.
 
