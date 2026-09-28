@@ -56,9 +56,7 @@ class TemplateModel(BaseHTTPRequestHandler):
         if len(results) == 1:
             return {'role': 'assistant', 'content': None, 'tool_calls': [call('search_documents', {'query': 'CFG-MGMT-01 telnet'}, 1)]}
         lint = json.loads(re.search(r'\{.*\}', results[0], re.S).group(0))
-        lines = [f"- {f['rule']} ({f['severity']}), line {f['line']}: {f['title']}." for f in lint['findings']]
-        verdict = f"{len(lint['findings'])} findings." if lines else 'No findings against the configuration rules.'
-        text = f"Review of {lint['file']}: {verdict}\n" + '\n'.join(lines)
+        text = f"Review of {lint['file']}: {lint['finding_count']} findings.\n{lint['report']}"
         if self.LEAK:
             text += '\nLine 4 reads: enable password Sample-Only-1'
         return {'role': 'assistant', 'content': text}
@@ -99,6 +97,8 @@ class ToolTests(unittest.TestCase):
                          ('munich-edge-01', 'Network Operations', 'demo-trend', 240))
         self.assertTrue(out['beats_baseline'])
         self.assertIn('not an outage probability', out['note'])
+        self.assertIn('does not cross 80 % within 240 minutes', out['summary'])
+        self.assertIn('beats the seasonal baseline', out['summary'])
         crossing = json.loads(metric_forecast({'sensor_id': '1001', 'threshold': 72, 'horizon_steps': 96}, tool_ctx()))
         self.assertIsNotNone(crossing['crossing_in_minutes'])
 
@@ -124,8 +124,15 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(json.loads(config_lint({'file': 'configs/sample-dc-core.cfg'}, tool_ctx()))['findings'], [])
         injected = json.loads(config_lint({'file': 'sample-injected.cfg'}, tool_ctx()))
         self.assertEqual([f['rule'] for f in injected['findings']], ['CFG-MGMT-01'])
-        commented = json.loads(config_lint({'text': '! transport input telnet\nservice password-encryption\n'
-                                                     'logging host 10.0.0.1\nntp server 10.0.0.2\n'}, tool_ctx()))
+        self.assertEqual(edge['finding_count'], 9)
+        self.assertEqual(len(edge['report'].splitlines()), 9)
+        self.assertIn('[high] CFG-SNMP-01 line 17: Default SNMP community string. Fix: remove the community', edge['report'])
+        self.assertEqual(json.loads(config_lint({'file': 'sample-dc-core.cfg'}, tool_ctx()))['report'],
+                         'No findings against the configuration rules.')
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / 'c.cfg').write_text('! transport input telnet\nservice password-encryption\n'
+                                             'logging host 10.0.0.1\nntp server 10.0.0.2\n')
+            commented = json.loads(config_lint({'file': 'c.cfg'}, tool_ctx(configs_dir=Path(tmp))))
         self.assertEqual(commented['findings'], [])
 
     def test_config_lint_stays_in_configs_folder(self):

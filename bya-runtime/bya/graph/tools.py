@@ -173,11 +173,19 @@ def metric_forecast(args, ctx):
     backend = 'demo-trend' if ctx.mode == 'sample' else 'timesfm'  # live never falls back to the demo trend
     f = forecasting.forecast(values, horizon, threshold, direction, backend, FORECAST_PERIOD)
     step = f['crossing_step']
+    minutes = horizon * FORECAST_INTERVAL // 60
+    crossing = (f'The forecast crosses {threshold:g} {sensor["unit"]} ({direction}) in {step * FORECAST_INTERVAL // 60} minutes.'
+                if step else f'The forecast does not cross {threshold:g} {sensor["unit"]} within {minutes} minutes.')
+    quality = (f'The forecast beats the seasonal baseline (holdout error {f["mae"]:.3g} vs {f["baseline_mae"]:.3g}).'
+               if f['beats_baseline'] else
+               f'The forecast does NOT beat the seasonal baseline (holdout error {f["mae"]:.3g} vs {f["baseline_mae"]:.3g}); treat it as unreliable.')
     return json.dumps({
+        'summary': (f'{sensor["channel"]} on {asset["name"]} is {values[-1]:.2f} {sensor["unit"]} now and '
+                    f'{f["point"][-1]:.2f} {sensor["unit"]} in {minutes} minutes. {crossing} {quality}'),
         'asset': asset['name'], 'service': asset['service'], 'owner': asset['owner'],
         'channel': sensor['channel'], 'unit': sensor['unit'], 'backend': backend,
         'latest_value': round(values[-1], 2), 'forecast_end_value': round(f['point'][-1], 2),
-        'horizon_minutes': horizon * FORECAST_INTERVAL // 60, 'threshold': threshold, 'direction': direction,
+        'horizon_minutes': minutes, 'threshold': threshold, 'direction': direction,
         'crossing_in_minutes': step * FORECAST_INTERVAL // 60 if step else None,
         'holdout_mae': round(f['mae'], 3), 'seasonal_baseline_mae': round(f['baseline_mae'], 3),
         'beats_baseline': f['beats_baseline'], 'runbook_ids': asset.get('runbook_ids', []),
@@ -187,21 +195,29 @@ def metric_forecast(args, ctx):
 
 
 # Configuration rules for IOS-style configs. Each finding names the rule, the line and a masked excerpt.
-MAX_CONFIG = 200_000
+MAX_CONFIG = 500_000
 SECRET_AFTER = re.compile(r'(?i)\b(password|secret|community|key|key-string)(\s+\d)?\s+\S+')
 LINE_RULES = [
-    ('CFG-MGMT-01', 'high', 'Telnet allowed on VTY lines', re.compile(r'^\s*transport input .*\b(telnet|all)\b', re.I)),
-    ('CFG-MGMT-02', 'medium', 'Plain HTTP management server enabled', re.compile(r'^\s*ip http server\s*$', re.I)),
-    ('CFG-SNMP-01', 'high', 'Default SNMP community string', re.compile(r'^\s*snmp-server community (public|private)\b', re.I)),
-    ('CFG-SNMP-02', 'high', 'SNMP read-write community', re.compile(r'^\s*snmp-server community \S+ RW\b', re.I)),
-    ('CFG-AUTH-02', 'high', 'Enable password instead of enable secret', re.compile(r'^\s*enable password\b', re.I)),
-    ('CFG-AUTH-03', 'medium', 'Local user with a reversible password', re.compile(r'^\s*username \S+ (privilege \d+ )?password\b', re.I)),
-    ('CFG-ACL-01', 'high', 'ACL permits any source to any destination', re.compile(r'^\s*(\d+\s+)?(access-list \d+ )?permit ip any any\b', re.I)),
+    ('CFG-MGMT-01', 'high', 'Telnet allowed on VTY lines', 'transport input ssh on every VTY line',
+     re.compile(r'^\s*transport input .*\b(telnet|all)\b', re.I)),
+    ('CFG-MGMT-02', 'medium', 'Plain HTTP management server enabled', 'no ip http server',
+     re.compile(r'^\s*ip http server\s*$', re.I)),
+    ('CFG-SNMP-01', 'high', 'Default SNMP community string', 'remove the community; use SNMPv3 with auth and priv',
+     re.compile(r'^\s*snmp-server community (public|private)\b', re.I)),
+    ('CFG-SNMP-02', 'high', 'SNMP read-write community', 'remove read-write communities',
+     re.compile(r'^\s*snmp-server community \S+ RW\b', re.I)),
+    ('CFG-AUTH-02', 'high', 'Enable password instead of enable secret', 'replace enable password with enable secret (type 9)',
+     re.compile(r'^\s*enable password\b', re.I)),
+    ('CFG-AUTH-03', 'medium', 'Local user with a reversible password', 'use username NAME secret (type 9) instead of password',
+     re.compile(r'^\s*username \S+ (privilege \d+ )?password\b', re.I)),
+    ('CFG-ACL-01', 'high', 'ACL permits any source to any destination', 'permit only required traffic; end with a logged deny',
+     re.compile(r'^\s*(\d+\s+)?(access-list \d+ )?permit ip any any\b', re.I)),
 ]
 ABSENT_RULES = [
-    ('CFG-AUTH-01', 'medium', 'Password encryption service not enabled', re.compile(r'^\s*service password-encryption\b', re.I | re.M)),
-    ('CFG-LOG-01', 'low', 'No remote syslog server', re.compile(r'^\s*logging (host )?\d', re.I | re.M)),
-    ('CFG-NTP-01', 'low', 'No NTP server', re.compile(r'^\s*ntp server\b', re.I | re.M)),
+    ('CFG-AUTH-01', 'medium', 'Password encryption service not enabled', 'service password-encryption',
+     re.compile(r'^\s*service password-encryption\b', re.I | re.M)),
+    ('CFG-LOG-01', 'low', 'No remote syslog server', 'logging host <collector>', re.compile(r'^\s*logging (host )?\d', re.I | re.M)),
+    ('CFG-NTP-01', 'low', 'No NTP server', 'ntp server <server>', re.compile(r'^\s*ntp server\b', re.I | re.M)),
 ]
 
 
@@ -210,34 +226,36 @@ def config_files_dir(ctx):
 
 
 def config_lint(args, ctx):
-    """Check a device configuration against the built-in rules. Read-only; secrets are masked in findings."""
-    text, name = args.get('text'), args.get('file')
-    if name:
-        base = config_files_dir(ctx).resolve()
-        path = (base / str(name).removeprefix('configs/')).resolve()
-        if not path.is_relative_to(base) or not path.is_file():
-            return f'No config file "{name}" in the configs folder.'
-        text = path.read_text(errors='replace')
-    if not isinstance(text, str) or not text.strip():
-        raise ValueError('Give a config "file" from the configs folder, or the config "text".')
-    if len(text) > MAX_CONFIG:
-        raise ValueError(f'Config is larger than {MAX_CONFIG} characters.')
+    """Check one config file from the configs folder against the rules. Read-only; secrets are masked.
+    Returns a ready-made report so the model repeats the findings instead of re-deriving them."""
+    name = str(args.get('file') or '').strip()
+    if not name:
+        raise ValueError('Give the config "file" name from the configs folder.')
+    base = config_files_dir(ctx).resolve()
+    path = (base / name.removeprefix('configs/')).resolve()
+    if not path.is_relative_to(base) or not path.is_file():
+        return f'No config file "{name}" in the configs folder.'
+    if path.stat().st_size > MAX_CONFIG:
+        raise ValueError(f'Config is larger than {MAX_CONFIG} bytes.')
+    lines = path.read_text(errors='replace').splitlines()
     findings = []
-    for n, line in enumerate(text.splitlines(), 1):
+    for n, line in enumerate(lines, 1):
         if line.lstrip().startswith('!'):
             continue  # comments never trigger or suppress rules
-        for rule, severity, title, rx in LINE_RULES:
+        for rule, severity, title, fix, rx in LINE_RULES:
             if rx.search(line):
                 excerpt = SECRET_AFTER.sub(lambda m: f'{m.group(1)} ****', line.strip())[:120]
-                findings.append({'rule': rule, 'severity': severity, 'title': title, 'line': n, 'excerpt': excerpt})
-    active = '\n'.join(l for l in text.splitlines() if not l.lstrip().startswith('!'))
-    findings += [{'rule': rule, 'severity': severity, 'title': title, 'line': None, 'excerpt': 'not configured'}
-                 for rule, severity, title, rx in ABSENT_RULES if not rx.search(active)]
+                findings.append({'rule': rule, 'severity': severity, 'title': title, 'line': n, 'excerpt': excerpt, 'fix': fix})
+    active = '\n'.join(l for l in lines if not l.lstrip().startswith('!'))
+    findings += [{'rule': rule, 'severity': severity, 'title': title, 'line': None, 'excerpt': 'not configured', 'fix': fix}
+                 for rule, severity, title, fix, rx in ABSENT_RULES if not rx.search(active)]
     order = {'high': 0, 'medium': 1, 'low': 2}
     findings.sort(key=lambda f: (order[f['severity']], f['line'] or 10**9))
-    return json.dumps({'file': name, 'lines': len(text.splitlines()), 'findings': findings,
+    report = [f"- [{f['severity']}] {f['rule']}{' line ' + str(f['line']) if f['line'] else ''}: {f['title']}. Fix: {f['fix']}."
+              for f in findings] or ['No findings against the configuration rules.']
+    return json.dumps({'file': name, 'lines': len(lines), 'finding_count': len(findings),
+                       'report': '\n'.join(report), 'findings': findings,
                        'rules_checked': len(LINE_RULES) + len(ABSENT_RULES)})
-
 
 BUILTINS = {
     'calculator': (calculator, 'Evaluate an arithmetic expression. Use for any maths.',
@@ -257,9 +275,9 @@ BUILTINS = {
                             'direction': {'type': 'string', 'enum': ['above', 'below']},
                             'horizon_steps': {'type': 'integer', 'description': '5-minute steps, 1-96 (default 48)'}},
                          'required': ['sensor_id', 'threshold']}),
-    'config_lint': (config_lint, 'Check a device configuration against the configuration rules. Pass a file name '
-                                 'from the configs folder, or the config text. Returns findings with rule ids.',
-                    {'type': 'object', 'properties': {'file': {'type': 'string'}, 'text': {'type': 'string'}}}),
+    'config_lint': (config_lint, 'Check one device configuration file from the configs folder against the '
+                                 'configuration rules. Returns a report with rule ids, lines and fixes.',
+                    {'type': 'object', 'properties': {'file': {'type': 'string'}}, 'required': ['file']}),
 }
 
 

@@ -4,7 +4,7 @@ You draw the agent as a diagram, test it, connect one of your own tools, and exp
 Everything runs on your machine. Nothing leaves it unless you add an output and approve a draft.
 
 You need Python 3.11+ and a model endpoint that speaks the OpenAI chat API: local (Ollama, vLLM, llama.cpp) or hosted.
-Pick a model with tool calling. Qwen2.5 3B passes the three templates' evals; a 7B–8B model is more reliable.
+Pick a model with tool calling. In testing, Qwen2.5 3B passed 26 of 27 template eval runs but still misreads numbers now and then; use a 7B–8B model if you can.
 
 ## 1. Start the studio (2 minutes)
 

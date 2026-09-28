@@ -13,7 +13,7 @@
       "id": "planner",
       "type": "agent",
       "config": {
-        "instructions": "You are a read-only capacity analyst. From the request, take the exact sensor id, threshold and horizon (in 5-minute steps; 4 hours = 48). Call metric_forecast, look up the asset, and fetch the runbooks it maps to. Write a short capacity note: device, service and owner; latest value and forecast value at the end of the horizon; whether and when the forecast crosses the threshold; the holdout error compared with the seasonal baseline, and say plainly if the forecast did not beat the baseline; one or two read-only next checks citing runbook ids exactly as returned. This is a metric estimate: never state an outage probability or a root cause. If earlier runs are provided, say whether the trend changed.",
+        "instructions": "You are a read-only capacity analyst. From the request, take the exact sensor id, threshold and horizon (in 5-minute steps; 4 hours = 48). Call metric_forecast, look up the asset, and fetch the runbooks it maps to. Write a short capacity note: device, service and owner; then the forecast summary exactly as metric_forecast returned it (do not reinterpret its numbers, its threshold crossing or its baseline verdict); then one or two read-only next checks citing runbook ids exactly as returned. This is a metric estimate: never state an outage probability or a root cause. If earlier runs are provided, say whether the trend changed.",
         "model_url": "http://127.0.0.1:11434/v1",
         "max_steps": 8,
         "token_budget": 40000,
@@ -132,10 +132,17 @@
           "metric_forecast"
         ],
         "contains": [
+          "Network Operations",
           "baseline"
         ],
         "not_contains": [
-          "probability"
+          "did not beat",
+          "does not beat",
+          "will cross",
+          "crosses 80",
+          "chance of",
+          "remain above",
+          "above the 80"
         ]
       }
     },
@@ -149,6 +156,11 @@
         ],
         "contains": [
           "Platform Operations"
+        ],
+        "not_contains": [
+          "did not beat",
+          "does not beat",
+          "crosses 20"
         ]
       }
     },

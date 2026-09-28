@@ -67,10 +67,12 @@ The canvas refuses connections the rules never allow, and says why (for example,
 | Template | Flow | Notes |
 |---|---|---|
 | Incident brief | alert → agent → output check → approval → file | Asset lookup and runbook search; cites only runbooks the tools returned |
-| Capacity forecast | request → agent → output check → approval → file | `metric_forecast` backtests against a seasonal-naive baseline and says when it didn't beat it; run history memory compares with earlier runs. Sample mode uses a trend baseline; live mode uses TimesFM and never falls back |
-| Config review | file name → agent → redact → output check → approval → file | `config_lint` reads only `configs/`, checks 10 IOS-style rules and masks secrets; document search explains each rule from `knowledge/config-standards.md`; the output check blocks a "fully compliant" claim |
+| Capacity forecast | request → agent → output check → approval → file | `metric_forecast` backtests against a seasonal-naive baseline and returns a one-sentence summary (crossing and baseline verdict) that the agent repeats; run history memory compares with earlier runs. Sample mode uses a trend baseline; live mode uses TimesFM and never falls back |
+| Config review | file name → agent → redact → output check → approval → file | `config_lint` reads one file from `configs/`, checks 10 IOS-style rules, masks secrets and returns a ready-made report that the agent must repeat verbatim; document search explains each rule from `knowledge/config-standards.md`; the output check blocks a "fully compliant" claim |
 
 The config rules and the standard are samples: replace `knowledge/config-standards.md` with your own standard, and put configuration backups in `configs/`.
+
+Why the tools return ready-made text: in testing, a 3B model dropped findings, inverted a fix and misread a baseline comparison when it had to interpret raw tool output. Deterministic conclusions come from the tool; the model explains them.
 
 **The validator refuses to run a diagram that breaks a safety rule:**
 - exactly one trigger, no loops in the flow
