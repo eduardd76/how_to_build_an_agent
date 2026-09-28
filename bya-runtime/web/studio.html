@@ -25,6 +25,7 @@
       <span id="status-pill" class="pill" role="status">Checking…</span>
       <label class="sr-only" for="mode">Mode</label>
       <select id="mode"><option value="sample">Sample data</option><option value="live">Live</option></select>
+      <button class="btn" id="inbox">Inbox (0)</button>
       <button class="btn primary" id="run">▷ Run</button>
     </div>
   </header>
@@ -67,7 +68,7 @@
     </label>
     <ol class="trace" id="trace"></ol>
     <div class="draft" id="draft-box" hidden>
-      <strong>Draft waiting for your approval</strong>
+      <strong id="draft-title">Draft waiting for your approval</strong>
       <pre id="draft"></pre>
       <div class="draft-actions">
         <button class="btn primary" id="approve">Approve</button>
@@ -76,6 +77,7 @@
     </div>
   </section>
 </div>
+<section class="inbox-panel" id="inbox-panel" aria-label="Approval inbox" hidden></section>
 <div id="toast" role="status" aria-live="polite" hidden></div>
 </body>
 </html>

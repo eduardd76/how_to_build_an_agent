@@ -16,8 +16,9 @@ bya/prompts.py       Every model instruction, versioned (PROMPT_VERSION is store
 bya/guards.py        Deterministic checks on model text before a human reviews it
 bya/store.py         Run history and the delivery state machine
 evals/               Fixed-evidence evaluation of incident briefs and forecast explanations
-bya/graph/           Diagram runtime: block catalogue, validator, executor, tools (built-in, HTTP, MCP)
+bya/graph/           Diagram runtime: block catalogue, validator, executor, tools (built-in, HTTP, MCP), memory
 diagrams/            Example diagrams
+knowledge/           Documents for the document-search memory block (sample included)
 ```
 
 Flow of an incident brief: SSOT → Knowledge → Monitoring → Analysis (model) → Output checks → Delivery policy → human approval → Slack.
@@ -57,7 +58,8 @@ The canvas refuses connections the rules never allow, and says why (for example,
 | Trigger | `trigger.manual`, `trigger.webhook`, `trigger.alert` (sample or PRTG) |
 | Agent | `agent`: instructions, model endpoint, `max_steps`, `token_budget`, `timeout_s` |
 | Tool (attached) | `tool.builtin` (calculator, time, asset lookup, runbook search), `tool.http`, `tool.mcp` (local MCP servers over stdio) |
-| Guardrail | `guard.output_check`, `guard.approval` |
+| Memory (attached) | `memory.kv` (remember/recall facts across runs), `memory.conversation` (inputs and results of the last completed runs), `memory.documents` (keyword search over `knowledge/`) |
+| Guardrail | `guard.policy` (attached: denied tools, tools that always need approval, max tool calls), `guard.redact` (removes secrets, and optionally emails and IPs, from the draft), `guard.output_check`, `guard.approval` |
 | Output | `output.file`, `output.webhook`, `output.slack` |
 
 **The validator refuses to run a diagram that breaks a safety rule:**
@@ -84,10 +86,19 @@ python -m bya.graph validate diagrams/incident-brief.json
 LLM_MODEL=llama3.1:8b python -m bya.graph run diagrams/incident-brief.json   # approvals asked in the terminal
 ```
 
-Current limits:
-- MCP servers must be local (stdio); remote MCP isn't supported yet.
-- No memory blocks yet.
-- In the studio, write tools are always refused until an approval inbox exists; in the terminal you're asked per call.
+**Approvals:**
+- In the studio, a call to a write tool (or to any tool the permission policy names) pauses the whole run. The agent resumes exactly where it stopped once you decide.
+- **Inbox** in the top bar lists everything waiting across runs: tool calls with their arguments, and drafts.
+- A denied tool call doesn't end the run; the agent is told and continues.
+- Time spent waiting for a person doesn't count against the agent's timeout.
+- In the terminal, you're asked per call instead.
+
+**Memory:**
+- Memory stays local, in `bya.sqlite3`, and is bounded.
+- Run history is written only for runs that completed, so blocked, rejected or failed drafts are never remembered.
+- Whatever is read back from memory is passed to the model as data.
+
+Current limit: MCP servers must be local (stdio); remote MCP isn't supported yet.
 
 **Imported diagrams can start local programs.** An MCP block runs its command when the diagram runs, and the studio shows that command on the block's settings panel. Only run diagrams and MCP servers you trust.
 
