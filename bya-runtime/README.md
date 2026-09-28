@@ -57,10 +57,20 @@ The canvas refuses connections the rules never allow, and says why (for example,
 |---|---|
 | Trigger | `trigger.manual`, `trigger.webhook`, `trigger.alert` (sample or PRTG) |
 | Agent | `agent`: instructions, model endpoint, `max_steps`, `token_budget`, `timeout_s` |
-| Tool (attached) | `tool.builtin` (calculator, time, asset lookup, runbook search), `tool.http`, `tool.mcp` (local MCP servers over stdio) |
+| Tool (attached) | `tool.builtin` (calculator, time, asset lookup, runbook search, metric forecast, config check), `tool.http`, `tool.mcp` (local MCP servers over stdio) |
 | Memory (attached) | `memory.kv` (remember/recall facts across runs), `memory.conversation` (inputs and results of the last completed runs), `memory.documents` (keyword search over `knowledge/`) |
 | Guardrail | `guard.policy` (attached: denied tools, tools that always need approval, max tool calls), `guard.redact` (removes secrets, and optionally emails and IPs, from the draft), `guard.output_check`, `guard.approval` |
 | Output | `output.file`, `output.webhook`, `output.slack` |
+
+**Templates** (in `diagrams/`, offered under **Start from…**), each with three eval cases:
+
+| Template | Flow | Notes |
+|---|---|---|
+| Incident brief | alert → agent → output check → approval → file | Asset lookup and runbook search; cites only runbooks the tools returned |
+| Capacity forecast | request → agent → output check → approval → file | `metric_forecast` backtests against a seasonal-naive baseline and says when it didn't beat it; run history memory compares with earlier runs. Sample mode uses a trend baseline; live mode uses TimesFM and never falls back |
+| Config review | file name → agent → redact → output check → approval → file | `config_lint` reads only `configs/`, checks 10 IOS-style rules and masks secrets; document search explains each rule from `knowledge/config-standards.md`; the output check blocks a "fully compliant" claim |
+
+The config rules and the standard are samples: replace `knowledge/config-standards.md` with your own standard, and put configuration backups in `configs/`.
 
 **The validator refuses to run a diagram that breaks a safety rule:**
 - exactly one trigger, no loops in the flow

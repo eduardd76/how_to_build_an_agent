@@ -33,6 +33,8 @@ class Context:
         self.runbooks = json.loads((RUNTIME / 'runbooks.json').read_text())
         self.memory_path = memory_path
         self.knowledge_dir = knowledge_dir
+        self.configs_dir = RUNTIME / 'configs'
+        self.monitoring = None
 
 
 def trace(state, block_id, detail, **extra):
@@ -316,6 +318,7 @@ def run(payload=None, *, mode='sample', approve=None, approve_tool=None, monitor
     monitoring = monitoring or (adapters.SampleMonitoring() if mode == 'sample' else adapters.PrtgMonitoring(
         json.loads((RUNTIME / 'config.local.json').read_text()) if (RUNTIME / 'config.local.json').exists() else {{}}))
     output_dir = output_dir or HERE / 'outputs'
+    ctx.monitoring = monitoring
     state = {{'status': 'running', 'trace': [], 'seen_citations': [], 'violations': [], 'pending': None, 'result': None}}
     memory_writes = []
     try:

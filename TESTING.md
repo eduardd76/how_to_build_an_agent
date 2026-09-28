@@ -37,7 +37,8 @@ Open `http://127.0.0.1:8787` and keep the terminal open.
 - [ ] Open `http://127.0.0.1:8787/studio.html`. Choose **Start from… → Incident brief**; the status shows **Ready to run**.
 - [ ] Drag from the agent's right-hand port to the **Save to file** block. The canvas refuses, and explains that an output needs a check and an approval first.
 - [ ] Set the agent's model endpoint to your model, open **Evals**, tick **Also test the Python export** and click **Run evals**. Each case shows pass or fail per check, and the export line says whether it matches the diagram.
-- [ ] **Export Python** downloads `incident-brief.py`; `python incident-brief.py` runs it with approvals in the terminal.
+- [ ] **Export Python** downloads `incident-brief.py`. From `bya-runtime/`, `PYTHONPATH=. BYA_RUNTIME=. python ~/Downloads/incident-brief.py` runs it with approvals in the terminal.
+- [ ] **Start from… → Capacity forecast** and **Config review** both show **Ready to run**. With your model set on the agent, each passes its evals (3/3).
 
 Stop the server with `Ctrl+C`.
 

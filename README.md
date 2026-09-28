@@ -38,7 +38,9 @@ cd bya-runtime
 python server.py        # open http://127.0.0.1:8787
 ```
 
-**Draw your own agent:** with the runtime running, open `http://127.0.0.1:8787/studio.html`. Drag blocks onto the canvas, connect them, and run. The canvas won't let you wire an output without an output check and a human approval in front of it.
+**Draw your own agent:** with the runtime running, open `http://127.0.0.1:8787/studio.html`. Start from a template (incident brief, capacity forecast, config review) or drag blocks onto the canvas, connect them, test them with evals, and export the result as Python. The canvas won't let you wire an output without an output check and a human approval in front of it.
+
+New here? **[Build your first agent in 30 minutes](FIRST_AGENT.md)**, including connecting one of your own tools.
 
 **Tests and evals:**
 
@@ -51,6 +53,7 @@ cd bya-runtime && python -m unittest discover -s tests && python evals/run_evals
 
 ```
 GUIDE.md            The 13-phase guide
+FIRST_AGENT.md      Build, test and export your first agent in the studio
 TESTING.md          Staged checklist: sample data → real model → PRTG → Slack → TimesFM
 examples/
   llm.py            Minimal OpenAI-compatible client and agent loop (stdlib only)
@@ -58,8 +61,9 @@ examples/
 bya-runtime/
   bya/              Pipeline, adapters, output checks, forecasting, delivery state machine
   bya/graph/        Diagram runtime: validator, executor, built-in/HTTP/MCP tools
-  diagrams/         Example agent diagrams
+  diagrams/         Templates: incident brief, capacity forecast, config review
   knowledge/        Local documents for the document-search memory block
+  configs/          Device configurations for the config check (samples included)
   evals/            Fixed-evidence evals, including prompt-injection cases
   tests/            Unit and HTTP tests
   web/              Local builder UI

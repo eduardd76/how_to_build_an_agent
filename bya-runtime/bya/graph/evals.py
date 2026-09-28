@@ -72,6 +72,9 @@ class CaseMonitoring:
             return self.fallback.alert(sensor_id)
         return {'sensor_id': str(sensor_id), 'collected_at': stamp(), **self.alert_data}
 
+    def history(self, sensor, interval, now):
+        return self.fallback.history(sensor, interval, now)
+
 
 def draft_of(state):
     pending = state.get('pending') or {}

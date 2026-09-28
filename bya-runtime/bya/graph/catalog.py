@@ -35,7 +35,7 @@ SPECS = {spec.type: spec for spec in (
     BlockSpec('output.slack', 'output', inputs=frozenset({'approved_draft'})),
 )}
 
-BUILTIN_FUNCTIONS = ('calculator', 'time_now', 'asset_lookup', 'runbook_search')
+BUILTIN_FUNCTIONS = ('calculator', 'time_now', 'asset_lookup', 'runbook_search', 'metric_forecast', 'config_lint')
 NAMESPACE_LIMITS = {'max_entries': (1, 1000), 'max_items': (1, 20), 'max_results': (1, 10), 'max_tool_calls': (1, 200)}
 
 AGENT_LIMITS = {
@@ -66,7 +66,7 @@ UI = {
         _f('max_steps', 'Max steps', 'number', default=8, min=1, max=50),
         _f('token_budget', 'Token budget', 'number', default=40000, min=1000, max=1000000),
         _f('timeout_s', 'Timeout (seconds)', 'number', default=180, min=5, max=3600)]),
-    'tool.builtin': ('Built-in tools', 'Calculator, time, asset lookup and runbook search. Read-only.', [
+    'tool.builtin': ('Built-in tools', 'Calculator, time, asset lookup, runbook search, metric forecast and config check. Read-only.', [
         _f('functions', 'Functions', 'multiselect', options=list(BUILTIN_FUNCTIONS), default=['asset_lookup', 'runbook_search']),
         _f('access', 'Access', 'select', options=['read'], default='read')]),
     'tool.http': ('HTTP tool', 'Call a JSON API. Headers come from environment variables.', [

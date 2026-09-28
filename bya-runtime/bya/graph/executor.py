@@ -54,6 +54,7 @@ class Context:
     output_dir: Path = Path('outputs')
     memory_path: Path = Path('bya-memory.sqlite3')
     knowledge_dir: Path = Path('knowledge')
+    configs_dir: Path = None               # device configs for config_lint; default: knowledge_dir/../configs
     tool_approval_expires_s: int = 3600
     model_factory: object = ChatModel.from_agent_config
     slack_factory: object = None           # fn(channel) -> object with .send(text); defaults to adapters.SlackDelivery
