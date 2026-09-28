@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BYA · Diagram Studio</title>
+<meta name="description" content="Draw a tool-using agent as a diagram, validate it against safety rules and run it locally.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23192332'/%3E%3Cpath d='M9 8h8a5 5 0 0 1 0 10H9zm0 10h10a4 4 0 0 1 0 8H9z' fill='none' stroke='%2374dfbb' stroke-width='3'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="studio.css">
+<script defer src="studio.js"></script>
+</head>
+<body>
+<div class="studio-shell">
+  <header class="bar">
+    <a class="brand" href="./" aria-label="BYA home"><span class="mark">b.</span><span>BYA<small>DIAGRAM STUDIO</small></span></a>
+    <label class="sr-only" for="diagram-name">Diagram name</label>
+    <input id="diagram-name" class="name-input" value="Untitled agent" autocomplete="off">
+    <div class="bar-actions">
+      <label class="sr-only" for="template">Start from</label>
+      <select id="template"><option value="">Start from…</option></select>
+      <button class="btn" id="new">New</button>
+      <label class="btn file-btn">Import<input type="file" id="import" accept="application/json,.json"></label>
+      <button class="btn" id="export">Export</button>
+      <button class="btn" id="save">Save</button>
+      <span id="status-pill" class="pill" role="status">Checking…</span>
+      <label class="sr-only" for="mode">Mode</label>
+      <select id="mode"><option value="sample">Sample data</option><option value="live">Live</option></select>
+      <button class="btn primary" id="run">▷ Run</button>
+    </div>
+  </header>
+
+  <aside class="palette" aria-label="Blocks">
+    <p class="hint">Click or drag a block onto the canvas. Connect blocks by dragging from a port.</p>
+    <div id="palette"></div>
+  </aside>
+
+  <main class="stage">
+    <div class="canvas-wrap" id="canvas-wrap">
+      <div class="canvas" id="canvas" aria-label="Agent diagram">
+        <svg class="wires" id="wires" aria-hidden="true"></svg>
+        <div id="blocks"></div>
+        <div class="empty" id="empty">
+          <strong>Draw your agent.</strong>
+          <span>Start from a template above, or add a trigger, an agent, an output check, an approval and an output.</span>
+        </div>
+      </div>
+    </div>
+    <section class="problems" aria-labelledby="problems-title">
+      <h2 id="problems-title">Problems</h2>
+      <ul id="problems"></ul>
+    </section>
+  </main>
+
+  <aside class="inspector" aria-labelledby="inspector-title">
+    <h2 id="inspector-title">Settings</h2>
+    <div id="inspector"><p class="muted">Select a block or a wire.</p></div>
+  </aside>
+
+  <section class="runs" id="run-panel" aria-labelledby="run-title" hidden>
+    <div class="run-head">
+      <h2 id="run-title">Run</h2>
+      <span id="run-status" class="pill"></span>
+      <button class="btn small" id="close-run" aria-label="Close run panel">×</button>
+    </div>
+    <label class="field" id="run-input-field" hidden>Input for the manual trigger
+      <textarea id="run-input" rows="2"></textarea>
+    </label>
+    <ol class="trace" id="trace"></ol>
+    <div class="draft" id="draft-box" hidden>
+      <strong>Draft waiting for your approval</strong>
+      <pre id="draft"></pre>
+      <div class="draft-actions">
+        <button class="btn primary" id="approve">Approve</button>
+        <button class="btn" id="reject">Reject</button>
+      </div>
+    </div>
+  </section>
+</div>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

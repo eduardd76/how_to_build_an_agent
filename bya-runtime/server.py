@@ -3,15 +3,17 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import secrets
 import threading
 import urllib.parse
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from bya import adapters, pipeline, prompts, validation
+from bya import adapters, graph, pipeline, prompts, validation
 from bya.core import UTC, date
-from bya.store import RunStore
+from bya.graph.catalog import catalog
+from bya.store import DiagramRunStore, RunStore
 
 ROOT = Path(__file__).resolve().parent
 TOKEN = secrets.token_urlsafe(32)
@@ -29,6 +31,13 @@ def config():
 
 def store():
     return RunStore(ROOT / 'bya.sqlite3')
+
+
+def diagram_store():
+    return DiagramRunStore(ROOT / 'bya.sqlite3')
+
+
+DIAGRAM_FILE = re.compile(r'^[a-z0-9][a-z0-9-]{0,60}\.json$')
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -66,6 +75,16 @@ class Handler(SimpleHTTPRequestHandler):
             })
         if path == '/api/ssot':
             return self.send_json(read('ssot.json'))
+        if path == '/api/catalog':
+            return self.send_json({'types': catalog()})
+        if path == '/api/diagrams':
+            files = sorted((ROOT / 'diagrams').glob('*.json'))
+            return self.send_json({'diagrams': [{'file': f.name, 'name': _diagram_name(f)} for f in files]})
+        if path.startswith('/api/diagrams/'):
+            name = path.rsplit('/', 1)[-1]
+            if not DIAGRAM_FILE.match(name) or not (ROOT / 'diagrams' / name).exists():
+                return self.send_json({'error': 'Unknown diagram'}, 404)
+            return self.send_json(json.loads((ROOT / 'diagrams' / name).read_text()))
         if path.startswith('/api/'):
             return self.send_json({'error': 'Unknown endpoint'}, 404)
         super().do_GET()
@@ -146,7 +165,85 @@ def approve(data):
     return {'status': 'sent', 'timestamp': ts}
 
 
-ROUTES = {'/api/assist': assist, '/api/ssot': save_ssot, '/api/run': run_agent, '/api/approve': approve}
+def _diagram_name(path):
+    try:
+        return json.loads(path.read_text()).get('name', path.stem)
+    except (ValueError, OSError):
+        return path.stem
+
+
+def _diagram_context(mode):
+    cfg = config()
+    return graph.Context(
+        mode=mode, ssot=read('ssot.json'), runbooks=read('runbooks.json'),
+        monitoring=adapters.PrtgMonitoring(cfg) if mode == 'live' else adapters.SampleMonitoring(),
+        approve=None,        # pause at approval blocks; the reviewer decides in the canvas
+        approve_tool=None,   # write tools are denied until the approval inbox exists
+        output_dir=ROOT / 'outputs')
+
+
+def _mode(data):
+    mode = data.get('mode', 'sample')
+    if mode not in ('sample', 'live'):
+        raise ValueError('Mode must be "sample" or "live".')
+    return mode
+
+
+def diagram_validate(data):
+    diagram = graph.load(data.get('diagram'))
+    return {'violations': [v.to_dict() for v in graph.validate(diagram, _mode(data))]}
+
+
+def diagram_run(data):
+    doc, mode = data.get('diagram'), _mode(data)
+    diagram = graph.load(doc)
+    if not LOCK.acquire(blocking=False):
+        raise ValueError('Another run is active. Wait until it finishes.')
+    try:
+        try:
+            state = graph.run(diagram, _diagram_context(mode), data.get('input'))
+        except graph.DiagramInvalid as e:
+            return {'status': 'invalid', 'violations': [v.to_dict() for v in e.violations]}
+        except graph.StepFailed as e:
+            state = e.state
+            state['error'] = str(e)
+    finally:
+        LOCK.release()
+    rid = secrets.token_hex(12)
+    diagram_store().save(rid, doc, state)
+    return {'id': rid, **state}
+
+
+def diagram_approve(data):
+    rid = str(data.get('id', ''))
+    if not isinstance(data.get('approved'), bool):
+        raise ValueError('Send "approved": true or false.')
+    runs = diagram_store()
+    doc, state = runs.claim_paused(rid)
+    try:
+        state = graph.resume(graph.load(doc), state, data['approved'], _diagram_context(state.get('mode', 'sample')))
+    except graph.StepFailed as e:
+        state = e.state
+        state['error'] = str(e)
+    runs.update(rid, state)
+    return {'id': rid, **state}
+
+
+def diagram_save(data):
+    name = str(data.get('file', ''))
+    if not DIAGRAM_FILE.match(name):
+        raise ValueError('File name: lower-case letters, digits and "-", ending in .json.')
+    graph.load(data.get('diagram'))  # shape check; rule problems are allowed in a saved draft
+    target = ROOT / 'diagrams' / name
+    tmp = target.with_suffix('.pending')
+    tmp.write_text(json.dumps(data['diagram'], indent=2))
+    os.replace(tmp, target)
+    return {'saved': name}
+
+
+ROUTES = {'/api/assist': assist, '/api/ssot': save_ssot, '/api/run': run_agent, '/api/approve': approve,
+          '/api/diagram/validate': diagram_validate, '/api/diagram/run': diagram_run,
+          '/api/diagram/approve': diagram_approve, '/api/diagram/save': diagram_save}
 
 
 if __name__ == '__main__':

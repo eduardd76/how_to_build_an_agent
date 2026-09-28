@@ -34,6 +34,8 @@ Open `http://127.0.0.1:8787` and keep the terminal open.
 - [ ] **Capacity forecast** template → **Run test**: a chart appears and the draft starts with `[SAMPLE / trend baseline]`.
 - [ ] **Approve & send** is blocked with "Sample drafts cannot send messages."
 - [ ] **Source of truth** view lists the 3 sample assets.
+- [ ] Open `http://127.0.0.1:8787/studio.html`. Choose **Start from… → Incident brief**; the status shows **Ready to run**.
+- [ ] Drag from the agent's right-hand port to the **Save to file** block. The canvas refuses, and explains that an output needs a check and an approval first.
 
 Stop the server with `Ctrl+C`.
 

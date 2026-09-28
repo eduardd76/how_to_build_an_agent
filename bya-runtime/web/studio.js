@@ -1,0 +1,515 @@
+'use strict';
+// BYA Diagram Studio: draw an agent as blocks, attachments and flow wires; the local runtime validates and runs it.
+
+const $ = s => document.querySelector(s);
+const CATEGORIES = [['trigger', 'Triggers'], ['agent', 'Agent'], ['tool', 'Tools (attach to an agent)'], ['guard', 'Guardrails'], ['output', 'Outputs']];
+const COLORS = {trigger: 'var(--cat-trigger)', agent: 'var(--cat-agent)', tool: 'var(--cat-tool)', guard: 'var(--cat-guard)', output: 'var(--cat-output)'};
+const ID_PREFIX = {'trigger': 'start', 'agent': 'agent', 'tool': 'tool', 'guard.output_check': 'check', 'guard.approval': 'approval', 'output': 'out'};
+const STORE_KEY = 'bya-studio-diagram-v1';
+const BLOCK_W = 176;
+
+let types = {};              // type -> catalogue entry
+let diagram = blank();
+let selected = null;         // {kind: 'block', id} | {kind: 'wire', list: 'flow'|'attachments', index}
+let violations = [];
+let token = null;
+let running = false;
+let currentRun = null;
+
+function blank() {
+  return {schema_version: '1.0', name: 'Untitled agent', blocks: [], attachments: [], flow: [], layout: {}};
+}
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+}
+function toast(text) {
+  const t = $('#toast'); t.textContent = text; t.hidden = false;
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => { t.hidden = true; }, 4200);
+}
+async function api(path, body) {
+  const opts = body === undefined ? {} : {method: 'POST', headers: {'Content-Type': 'application/json', 'X-BYA-Token': token}, body: JSON.stringify(body)};
+  const res = await fetch(path, opts);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Request failed.');
+  return data;
+}
+const block = id => diagram.blocks.find(b => b.id === id);
+const spec = b => types[b?.type];
+const category = b => spec(b)?.category;
+
+// ---------- persistence ----------
+function save() {
+  diagram.name = $('#diagram-name').value.trim() || 'Untitled agent';
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(diagram)); } catch {}
+}
+function setDiagram(doc) {
+  if (!doc || !Array.isArray(doc.blocks)) throw new Error('Not a diagram file.');
+  diagram = {...blank(), ...structuredClone(doc)};
+  diagram.layout = diagram.layout || {};
+  diagram.blocks.forEach((b, i) => { b.config = b.config || {}; diagram.layout[b.id] ??= freeSpot(i); });
+  $('#diagram-name').value = diagram.name;
+  selected = null;
+  renderAll();
+  changed();
+}
+
+// ---------- palette ----------
+function renderPalette() {
+  const byCat = {};
+  Object.values(types).forEach(t => (byCat[t.category] ??= []).push(t));
+  $('#palette').innerHTML = CATEGORIES.map(([cat, title]) => `<h3>${title}</h3>` + (byCat[cat] || []).map(t =>
+    `<button class="pal-item" style="--c:${COLORS[cat]}" data-type="${esc(t.type)}"><strong>${esc(t.label)}</strong><span>${esc(t.description)}</span></button>`
+  ).join('')).join('');
+  document.querySelectorAll('.pal-item').forEach(el => {
+    el.addEventListener('pointerdown', e => paletteDrag(e, el.dataset.type));
+    el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); addBlock(el.dataset.type); } });
+  });
+}
+function paletteDrag(e, type) {
+  if (e.button !== 0) return;
+  const start = {x: e.clientX, y: e.clientY};
+  let ghost = null;
+  const move = ev => {
+    if (!ghost && Math.hypot(ev.clientX - start.x, ev.clientY - start.y) > 6) {
+      ghost = document.createElement('div');
+      ghost.className = 'block';
+      ghost.style.cssText = `position:fixed;pointer-events:none;opacity:.85;z-index:5;--c:${COLORS[types[type].category]}`;
+      ghost.innerHTML = `<span class="cat">${esc(types[type].category)}</span><span class="title">${esc(types[type].label)}</span>`;
+      document.body.appendChild(ghost);
+    }
+    if (ghost) { ghost.style.left = ev.clientX - 60 + 'px'; ghost.style.top = ev.clientY - 20 + 'px'; }
+  };
+  const up = ev => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    if (!ghost) { addBlock(type); return; }
+    ghost.remove();
+    const r = $('#canvas').getBoundingClientRect(), w = $('#canvas-wrap').getBoundingClientRect();
+    if (ev.clientX >= w.left && ev.clientX <= w.right && ev.clientY >= w.top && ev.clientY <= w.bottom)
+      addBlock(type, {x: Math.max(10, ev.clientX - r.left - 60), y: Math.max(10, ev.clientY - r.top - 20)});
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+}
+// Place new blocks inside the visible part of the canvas, left to right, then the next row.
+function freeSpot(i = diagram.blocks.length) {
+  const wrap = $('#canvas-wrap');
+  const cols = Math.max(1, Math.floor(((wrap?.clientWidth || 1000) - 40) / 220));
+  return {x: (wrap?.scrollLeft || 0) + 40 + (i % cols) * 220, y: (wrap?.scrollTop || 0) + 60 + Math.floor(i / cols) * 170};
+}
+function newId(type) {
+  const prefix = ID_PREFIX[type] || ID_PREFIX[types[type].category] || 'block';
+  let n = 1;
+  while (block(prefix + n)) n++;
+  return prefix + n;
+}
+function addBlock(type, pos) {
+  const t = types[type];
+  const config = {};
+  t.fields.forEach(f => { if (f.default !== undefined && f.default !== '') config[f.key] = structuredClone(f.default); });
+  const id = newId(type);
+  diagram.blocks.push({id, type, config});
+  diagram.layout[id] = pos || freeSpot();
+  selected = {kind: 'block', id};
+  renderAll();
+  changed();
+  toast(`Added ${t.label}.` + (t.attachable ? ' Attach it to an agent.' : ''));
+}
+
+// ---------- canvas ----------
+function summary(b) {
+  const c = b.config;
+  switch (b.type) {
+    case 'agent': return c.model ? `Model: ${c.model}` : 'Model: LLM_MODEL';
+    case 'trigger.alert': return `${c.source || '?'} · sensor ${c.sensor_id || '?'}`;
+    case 'tool.builtin': return (c.functions || []).join(', ');
+    case 'tool.http': return `${c.method || 'GET'} ${c.name || ''} · ${c.access || '?'}`;
+    case 'tool.mcp': return `${(c.command || []).join(' ')} · ${c.access || '?'}`;
+    case 'guard.approval': return `Expires in ${Math.round((c.expires_s || 3600) / 60)} min`;
+    case 'guard.output_check': return c.allowed_citations === 'seen_in_tool_results' ? 'Citations from tools only' : 'Action & root-cause checks';
+    case 'output.file': return c.path || '';
+    case 'output.slack': return `Channel from ${c.channel_env || '?'}`;
+    default: return spec(b)?.label || b.type;
+  }
+}
+function renderBlocks() {
+  const counts = {};
+  violations.forEach(v => { if (v.block) counts[v.block] = (counts[v.block] || 0) + 1; });
+  $('#blocks').innerHTML = diagram.blocks.map(b => {
+    const s = spec(b), p = diagram.layout[b.id] || {x: 40, y: 40}, cat = s?.category || 'output';
+    const isSel = selected?.kind === 'block' && selected.id === b.id, n = counts[b.id] || 0;
+    const ports = !s ? '' : [
+      s.inputs.length ? '<span class="port in" aria-hidden="true"></span>' : '',
+      s.output ? `<button class="port out" data-port="out" aria-label="Connect ${esc(b.id)} to the next block" title="Drag to the next block"></button>` : '',
+      b.type === 'agent' ? `<button class="port attach" data-port="attach" aria-label="Attach a tool to ${esc(b.id)}" title="Drag to a tool to attach it"></button>` : '',
+      s.attachable ? `<button class="port attach-in" data-port="attach-in" aria-label="Attach ${esc(b.id)} to an agent" title="Drag to an agent"></button>` : '',
+    ].join('');
+    return `<div class="block ${isSel ? 'selected' : ''} ${n ? 'error' : ''}" tabindex="0" data-id="${esc(b.id)}" style="left:${p.x}px;top:${p.y}px;--c:${COLORS[cat]}"
+      aria-label="${esc(s?.label || b.type)} ${esc(b.id)}${n ? `, ${n} problem${n > 1 ? 's' : ''}` : ''}">
+      <span class="cat">${esc(s?.label || 'Unknown block')}</span><span class="title">${esc(b.id)}</span><span class="sub">${esc(summary(b))}</span>
+      ${n ? `<span class="badge" aria-hidden="true">${n}</span>` : ''}${ports}</div>`;
+  }).join('');
+  $('#empty').hidden = diagram.blocks.length > 0;
+  document.querySelectorAll('.block').forEach(el => {
+    el.addEventListener('pointerdown', e => blockPointer(e, el));
+    el.addEventListener('keydown', e => {
+      if ((e.key === 'Enter' || e.key === ' ') && e.target === el) { e.preventDefault(); select({kind: 'block', id: el.dataset.id}); }
+    });
+  });
+  drawWires();
+}
+function anchor(id, where) {
+  const el = document.querySelector(`.block[data-id="${CSS.escape(id)}"]`), p = diagram.layout[id];
+  if (!el || !p) return null;
+  const w = el.offsetWidth, h = el.offsetHeight;
+  return {out: {x: p.x + w, y: p.y + 42}, in: {x: p.x, y: p.y + 42}, bottom: {x: p.x + 88, y: p.y + h}, top: {x: p.x + 88, y: p.y}}[where];
+}
+function curve(a, b, vertical) {
+  if (vertical) { const d = Math.max(40, Math.abs(b.y - a.y) / 2); return `M${a.x} ${a.y} C${a.x} ${a.y + d},${b.x} ${b.y - d},${b.x} ${b.y}`; }
+  const d = b.x >= a.x ? Math.max(40, (b.x - a.x) / 2) : 70;  // backward wires: short, tight loop
+  return `M${a.x} ${a.y} C${a.x + d} ${a.y},${b.x - d} ${b.y},${b.x} ${b.y}`;
+}
+function drawWires(temp) {
+  let out = '';
+  for (const list of ['flow', 'attachments']) {
+    diagram[list].forEach(([a, b], index) => {
+      const p1 = list === 'flow' ? anchor(a, 'out') : anchor(a, 'bottom');
+      const p2 = list === 'flow' ? anchor(b, 'in') : anchor(b, 'top');
+      if (!p1 || !p2) return;
+      const d = curve(p1, p2, list === 'attachments');
+      const sel = selected?.kind === 'wire' && selected.list === list && selected.index === index;
+      out += `<path class="wire ${list === 'attachments' ? 'attach' : ''} ${sel ? 'selected' : ''}" d="${d}"/>`;
+      out += `<path class="hit" d="${d}" data-list="${list}" data-index="${index}"><title>${esc(a)} → ${esc(b)}</title></path>`;
+    });
+  }
+  if (temp) out += `<path class="temp" d="${curve(temp.a, temp.b, temp.vertical)}"/>`;
+  $('#wires').innerHTML = out;
+  document.querySelectorAll('#wires path.hit').forEach(p => p.addEventListener('click', () =>
+    select({kind: 'wire', list: p.dataset.list, index: Number(p.dataset.index)})));
+}
+function blockPointer(e, el) {
+  if (e.button !== 0) return;
+  const id = el.dataset.id, port = e.target.closest('.port')?.dataset.port;
+  if (port === 'out' || port === 'attach' || port === 'attach-in') { connectDrag(e, id, port); return; }
+  const start = {x: e.clientX, y: e.clientY}, p0 = {...diagram.layout[id]};
+  let moved = false;
+  el.setPointerCapture(e.pointerId);
+  const move = ev => {
+    const dx = ev.clientX - start.x, dy = ev.clientY - start.y;
+    if (!moved && Math.hypot(dx, dy) < 4) return;
+    moved = true;
+    diagram.layout[id] = {x: Math.max(0, Math.round(p0.x + dx)), y: Math.max(0, Math.round(p0.y + dy))};
+    el.style.left = diagram.layout[id].x + 'px'; el.style.top = diagram.layout[id].y + 'px';
+    drawWires();
+  };
+  const up = () => {
+    el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up);
+    if (moved) save(); else select({kind: 'block', id});
+  };
+  el.addEventListener('pointermove', move); el.addEventListener('pointerup', up);
+}
+function connectDrag(e, id, port) {
+  e.preventDefault();
+  const r = $('#canvas').getBoundingClientRect();
+  const a = port === 'out' ? anchor(id, 'out') : port === 'attach' ? anchor(id, 'bottom') : anchor(id, 'top');
+  const move = ev => drawWires({a, b: {x: ev.clientX - r.left, y: ev.clientY - r.top}, vertical: port !== 'out'});
+  const up = ev => {
+    window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
+    const target = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.block')?.dataset.id;
+    drawWires();
+    if (!target || target === id) return;
+    if (port === 'out') connect('flow', id, target);
+    else if (port === 'attach') connect('attachments', id, target);
+    else connect('attachments', target, id);
+  };
+  window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+}
+// Refuse connections the rules can never allow, and say why (the validator checks the rest).
+function connectionProblem(list, a, b) {
+  const A = block(a), B = block(b), sa = spec(A), sb = spec(B);
+  if (!sa || !sb) return 'Unknown block.';
+  if (diagram[list].some(([x, y]) => x === a && y === b)) return 'These blocks are already connected.';
+  if (list === 'attachments') {
+    if (A.type !== 'agent') return 'Only an agent can have tools attached.';
+    if (!sb.attachable) return `${sb.label} is part of the flow; connect it with a flow wire, not an attachment.`;
+    return null;
+  }
+  if (sa.attachable || sb.attachable) return 'Tools attach to an agent (dashed line); they are not part of the flow.';
+  if (!sa.output) return `${sa.label} is an end block; nothing comes after it.`;
+  if (!sb.inputs.includes(sa.output)) {
+    if (sb.category === 'output') return `${sb.label} only accepts an approved draft. Put an output check and a human approval in front of it.`;
+    if (B.type === 'guard.approval') return 'Human approval only accepts a checked draft. Put an output check in front of it.';
+    return `${sb.label} cannot follow ${sa.label}.`;
+  }
+  if (diagram.flow.some(([, y]) => y === b)) return `${b} already has an input; each block takes one incoming wire.`;
+  return null;
+}
+function connect(list, a, b) {
+  const problem = connectionProblem(list, a, b);
+  if (problem) { toast(problem); return false; }
+  diagram[list].push([a, b]);
+  renderBlocks(); renderInspector(); changed();
+  return true;
+}
+function removeBlock(id) {
+  diagram.blocks = diagram.blocks.filter(b => b.id !== id);
+  diagram.flow = diagram.flow.filter(([a, b]) => a !== id && b !== id);
+  diagram.attachments = diagram.attachments.filter(([a, b]) => a !== id && b !== id);
+  delete diagram.layout[id];
+  selected = null;
+  renderAll(); changed();
+}
+function removeWire(list, index) {
+  diagram[list].splice(index, 1);
+  selected = null;
+  renderAll(); changed();
+}
+function renameBlock(oldId, newId) {
+  if (!/^[A-Za-z0-9_-]{1,40}$/.test(newId)) return 'Use 1–40 letters, digits, "_" or "-".';
+  if (newId !== oldId && block(newId)) return 'Another block already has this name.';
+  block(oldId).id = newId;
+  for (const list of ['flow', 'attachments']) diagram[list] = diagram[list].map(([a, b]) => [a === oldId ? newId : a, b === oldId ? newId : b]);
+  diagram.layout[newId] = diagram.layout[oldId]; if (newId !== oldId) delete diagram.layout[oldId];
+  selected = {kind: 'block', id: newId};
+  return null;
+}
+
+// ---------- inspector ----------
+function select(sel, focusBlock = true) {
+  selected = sel;
+  renderBlocks(); renderInspector();
+  if (focusBlock && sel?.kind === 'block') document.querySelector(`.block[data-id="${CSS.escape(sel.id)}"]`)?.focus({preventScroll: true});
+}
+function fieldHtml(f, value, i) {
+  // Help text sits outside the label and is linked with aria-describedby, so the field's name stays short.
+  const id = `f-${i}`, helpId = `${id}-help`;
+  const help = f.help ? `<small id="${helpId}">${esc(f.help)}</small>` : '';
+  const desc = f.help ? ` aria-describedby="${helpId}"` : '';
+  const wrap = control => `<div class="field"><label for="${id}">${esc(f.label)}</label>${control}${help}</div>`;
+  switch (f.kind) {
+    case 'textarea': return wrap(`<textarea class="prose" id="${id}" rows="${f.key === 'instructions' ? 7 : 3}"${desc}>${esc(value ?? '')}</textarea>`);
+    case 'number': return wrap(`<input id="${id}" type="number" min="${f.min ?? ''}" max="${f.max ?? ''}" value="${esc(value ?? '')}"${desc}>`);
+    case 'select': return wrap(`<select id="${id}"${desc}>${f.options.map(o => `<option value="${esc(o)}" ${o === (value ?? '') ? 'selected' : ''}>${esc(o || '(none)')}</option>`).join('')}</select>`);
+    case 'checkbox': return `<label class="check-row"><input id="${id}" type="checkbox" ${value ? 'checked' : ''}${desc}> ${esc(f.label)}</label>${help}`;
+    case 'multiselect': return `<fieldset class="field" id="${id}"${desc}><legend>${esc(f.label)}</legend>${f.options.map((o, j) =>
+      `<label class="check-row"><input type="checkbox" value="${esc(o)}" id="${id}-${j}" ${(value || []).includes(o) ? 'checked' : ''}> ${esc(o)}</label>`).join('')}${help}</fieldset>`;
+    case 'list': return wrap(`<textarea id="${id}" rows="3"${desc}>${esc((value || []).join('\n'))}</textarea>`);
+    case 'json': return `<div class="field"><label for="${id}">${esc(f.label)}</label><textarea id="${id}" rows="4"${desc}>${esc(value === undefined ? '' : JSON.stringify(value, null, 2))}</textarea>${help}<small class="json-error" role="alert" hidden></small></div>`;
+    default: return wrap(`<input id="${id}" value="${esc(value ?? '')}" autocomplete="off"${desc}>`);
+  }
+}
+function bindField(f, i, b) {
+  const set = v => {
+    if (v === '' || v === undefined || (Array.isArray(v) && !v.length && f.kind !== 'multiselect')) delete b.config[f.key];
+    else b.config[f.key] = v;
+    const el = document.querySelector(`.block[data-id="${CSS.escape(b.id)}"] .sub`);
+    if (el) el.textContent = summary(b);
+    changed();
+  };
+  const el = document.getElementById(`f-${i}`);
+  if (f.kind === 'multiselect') {
+    el.addEventListener('change', () => set([...el.querySelectorAll('input:checked')].map(x => x.value)));
+  } else if (f.kind === 'checkbox') {
+    el.addEventListener('change', () => set(el.checked));
+  } else if (f.kind === 'number') {
+    el.addEventListener('input', () => { const n = parseInt(el.value, 10); set(Number.isFinite(n) ? n : undefined); });
+  } else if (f.kind === 'list') {
+    el.addEventListener('input', () => set(el.value.split('\n').map(s => s.trim()).filter(Boolean)));
+  } else if (f.kind === 'json') {
+    const err = el.closest('.field').querySelector('.json-error');
+    el.addEventListener('input', () => {
+      if (!el.value.trim()) { err.hidden = true; set(undefined); return; }
+      try { set(JSON.parse(el.value)); err.hidden = true; } catch { err.hidden = false; err.textContent = 'Not valid JSON yet; the last valid value is kept.'; }
+    });
+  } else {
+    el.addEventListener(f.kind === 'select' ? 'change' : 'input', () => set(el.value));
+  }
+}
+function renderInspector() {
+  const box = $('#inspector');
+  if (selected?.kind === 'wire') {
+    const pair = diagram[selected.list][selected.index];
+    if (!pair) { selected = null; return renderInspector(); }
+    box.innerHTML = `<p class="desc">${selected.list === 'flow' ? 'Flow wire' : 'Attachment'}: <strong>${esc(pair[0])}</strong> → <strong>${esc(pair[1])}</strong></p>
+      <button class="btn danger" id="remove-wire">Remove connection</button>`;
+    $('#remove-wire').onclick = () => removeWire(selected.list, selected.index);
+    return;
+  }
+  const b = selected?.kind === 'block' ? block(selected.id) : null;
+  if (!b) {
+    const n = diagram.blocks.length;
+    box.innerHTML = `<p class="desc">${n ? `${n} block${n > 1 ? 's' : ''}. Select one to edit it.` : 'Add blocks from the palette.'}</p>
+      <p class="desc"><strong>Solid arrows</strong> are the flow: what happens in order.<br><strong>Dashed lines</strong> attach tools to an agent: what it may use.</p>
+      <p class="desc">Every output must come after an <strong>output check</strong> and a <strong>human approval</strong>. The canvas refuses anything else.</p>`;
+    return;
+  }
+  const s = spec(b), mine = violations.filter(v => v.block === b.id);
+  const flowTargets = diagram.blocks.filter(x => x.id !== b.id && !connectionProblem('flow', b.id, x.id));
+  const attachTargets = b.type === 'agent' ? diagram.blocks.filter(x => !connectionProblem('attachments', b.id, x.id)) : [];
+  const links = [...diagram.flow.map((p, i) => ({p, i, list: 'flow'})), ...diagram.attachments.map((p, i) => ({p, i, list: 'attachments'}))]
+    .filter(({p}) => p.includes(b.id));
+  box.innerHTML = `<p class="desc"><strong>${esc(s?.label || b.type)}</strong><br>${esc(s?.description || '')}</p>
+    ${mine.length ? `<ul class="issues">${mine.map(v => `<li>${esc(v.message)}</li>`).join('')}</ul>` : ''}
+    ${b.type === 'tool.mcp' ? `<p class="warn">Running this diagram starts a local program: <code>${esc((b.config.command || []).join(' '))}</code>. Only run MCP servers you trust.</p>` : ''}
+    <div class="field"><label for="block-id">Name</label><input id="block-id" value="${esc(b.id)}" autocomplete="off"><small class="rename-error" role="alert" hidden></small></div>
+    ${(s?.fields || []).map((f, i) => fieldHtml(f, b.config[f.key], i)).join('')}
+    ${flowTargets.length ? `<div class="field"><label for="connect-to">Connect to (flow)</label><select id="connect-to"><option value="">Choose a block…</option>${flowTargets.map(x => `<option>${esc(x.id)}</option>`).join('')}</select></div>` : ''}
+    ${attachTargets.length ? `<div class="field"><label for="attach-to">Attach tool</label><select id="attach-to"><option value="">Choose a tool…</option>${attachTargets.map(x => `<option>${esc(x.id)}</option>`).join('')}</select></div>` : ''}
+    ${links.length ? `<p class="desc">Connections</p><ul class="muted">${links.map(({p, i, list}) =>
+      `<li>${esc(p[0])} ${list === 'flow' ? '→' : '⋯'} ${esc(p[1])} <button class="btn small" data-unlink="${list}:${i}" aria-label="Remove connection ${esc(p[0])} to ${esc(p[1])}">Remove</button></li>`).join('')}</ul>` : ''}
+    <div class="row"><button class="btn danger" id="delete-block">Delete block</button></div>`;
+  (s?.fields || []).forEach((f, i) => bindField(f, i, b));
+  const idInput = $('#block-id'), idErr = box.querySelector('.rename-error');
+  idInput.addEventListener('change', () => {
+    const problem = renameBlock(b.id, idInput.value.trim());
+    if (problem) { idErr.hidden = false; idErr.textContent = problem; idInput.value = b.id; return; }
+    idErr.hidden = true; renderBlocks(); renderInspector(); changed();
+  });
+  $('#connect-to')?.addEventListener('change', e => { if (e.target.value) connect('flow', b.id, e.target.value); });
+  $('#attach-to')?.addEventListener('change', e => { if (e.target.value) connect('attachments', b.id, e.target.value); });
+  box.querySelectorAll('[data-unlink]').forEach(btn => btn.addEventListener('click', () => {
+    const [list, i] = btn.dataset.unlink.split(':'); removeWire(list, Number(i)); select({kind: 'block', id: b.id});
+  }));
+  $('#delete-block').onclick = () => removeBlock(b.id);
+}
+
+// ---------- validation ----------
+function changed() {
+  save();
+  clearTimeout(changed.timer);
+  changed.timer = setTimeout(validate, 250);
+}
+async function validate() {
+  if (!token) return;
+  try {
+    violations = diagram.blocks.length ? (await api('/api/diagram/validate', {diagram, mode: $('#mode').value})).violations : [];
+  } catch (e) {
+    violations = [{block: null, rule: 'shape', message: e.message}];
+  }
+  renderProblems(); renderBlocks(); if (selected?.kind === 'block') renderInspectorIssuesOnly();
+}
+function renderInspectorIssuesOnly() {
+  const b = block(selected.id); if (!b) return;
+  const mine = violations.filter(v => v.block === b.id), box = $('#inspector');
+  let ul = box.querySelector('.issues');
+  if (!mine.length) { ul?.remove(); return; }
+  if (!ul) { ul = document.createElement('ul'); ul.className = 'issues'; box.querySelector('.desc').after(ul); }
+  ul.innerHTML = mine.map(v => `<li>${esc(v.message)}</li>`).join('');
+}
+function renderProblems() {
+  const pill = $('#status-pill');
+  if (!diagram.blocks.length) { pill.className = 'pill'; pill.textContent = 'Empty'; $('#problems').innerHTML = ''; return; }
+  pill.className = 'pill ' + (violations.length ? 'bad' : 'ok');
+  pill.textContent = violations.length ? `${violations.length} problem${violations.length > 1 ? 's' : ''}` : 'Ready to run';
+  $('#problems').innerHTML = violations.length ? violations.map((v, i) =>
+    `<li><button data-i="${i}">${v.block ? `<strong>${esc(v.block)}</strong>: ` : ''}${esc(v.message)}</button></li>`).join('')
+    : '<li class="ok">No problems. The diagram passes every safety rule.</li>';
+  document.querySelectorAll('#problems button').forEach(btn => btn.addEventListener('click', () => {
+    const v = violations[Number(btn.dataset.i)];
+    if (v.block && block(v.block)) select({kind: 'block', id: v.block});
+  }));
+}
+
+// ---------- running ----------
+function renderRun(state) {
+  currentRun = state;
+  $('#run-panel').hidden = false;
+  const labels = {completed: ['ok', 'Completed'], awaiting_approval: ['wait', 'Waiting for approval'], blocked: ['bad', 'Blocked by output check'],
+    rejected: ['bad', 'Rejected'], expired: ['bad', 'Approval expired'], failed: ['bad', 'Failed'], invalid: ['bad', 'Diagram has problems'], running: ['wait', 'Running…']};
+  const [cls, text] = labels[state.status] || ['', state.status];
+  $('#run-status').className = 'pill ' + cls; $('#run-status').textContent = text;
+  const rows = (state.trace || []).map(t => `<li class="${t.tool ? 'tool' : ''} ${String(t.detail).startsWith('Failed') ? 'fail' : ''}"><strong>${esc(t.block)}</strong> ${esc(t.detail)}<span class="ms">${t.ms} ms</span></li>`);
+  if (state.error) rows.push(`<li class="fail">${esc(state.error)}</li>`);
+  (state.violations || []).forEach(v => rows.push(`<li class="fail">${esc(typeof v === 'string' ? v : v.message)}</li>`));
+  $('#trace').innerHTML = rows.join('');
+  const waiting = state.status === 'awaiting_approval';
+  $('#draft-box').hidden = !waiting;
+  if (waiting) $('#draft').textContent = String(state.pending?.value ?? '');
+}
+async function runDiagram() {
+  if (running) return;
+  const hasManual = diagram.blocks.some(b => b.type === 'trigger.manual');
+  $('#run-input-field').hidden = !hasManual;
+  running = true; $('#run').disabled = true; $('#run').textContent = 'Running…';
+  renderRun({status: 'running', trace: []});
+  try {
+    renderRun(await api('/api/diagram/run', {diagram, mode: $('#mode').value, input: hasManual ? $('#run-input').value : null}));
+  } catch (e) {
+    renderRun({status: 'failed', trace: [], error: e.message});
+  } finally {
+    running = false; $('#run').disabled = false; $('#run').textContent = '▷ Run';
+  }
+}
+async function decide(approved) {
+  if (!currentRun?.id) return;
+  $('#approve').disabled = $('#reject').disabled = true;
+  try { renderRun(await api('/api/diagram/approve', {id: currentRun.id, approved})); }
+  catch (e) { toast(e.message); }
+  finally { $('#approve').disabled = $('#reject').disabled = false; }
+}
+
+// ---------- files ----------
+function download(name, text) {
+  const url = URL.createObjectURL(new Blob([text], {type: 'application/json'}));
+  const a = document.createElement('a'); a.href = url; a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+const slug = s => (s || 'agent').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 55) || 'agent';
+
+function renderAll() { renderBlocks(); renderInspector(); renderProblems(); }
+
+async function init() {
+  try {
+    const status = await (await fetch('/api/status')).json();
+    token = status.token;
+    types = Object.fromEntries((await api('/api/catalog')).types.map(t => [t.type, t]));
+  } catch {
+    document.querySelector('.stage').innerHTML = '<p class="desc" style="padding:24px">Diagram Studio needs the local runtime. Start it with <code>python server.py</code> and open <code>http://127.0.0.1:8787/studio.html</code>.</p>';
+    return;
+  }
+  renderPalette();
+  try {
+    const list = (await api('/api/diagrams')).diagrams;
+    $('#template').innerHTML += list.map(d => `<option value="${esc(d.file)}">${esc(d.name)}</option>`).join('');
+  } catch {}
+  let restored = null;
+  try { restored = JSON.parse(localStorage.getItem(STORE_KEY)); } catch {}
+  if (restored?.blocks) setDiagram(restored); else renderAll();
+
+  $('#template').onchange = async e => {
+    if (!e.target.value) return;
+    if (diagram.blocks.length && !confirm('Replace the current diagram with this template?')) { e.target.value = ''; return; }
+    try { setDiagram(await api('/api/diagrams/' + e.target.value)); toast('Template loaded.'); } catch (err) { toast(err.message); }
+    e.target.value = '';
+  };
+  $('#new').onclick = () => { if (!diagram.blocks.length || confirm('Start a new, empty diagram?')) { setDiagram(blank()); } };
+  $('#export').onclick = () => { save(); download(slug(diagram.name) + '.json', JSON.stringify(diagram, null, 2)); };
+  $('#save').onclick = async () => {
+    save();
+    const file = prompt('Save to diagrams/ as:', slug(diagram.name) + '.json');
+    if (!file) return;
+    try { await api('/api/diagram/save', {file, diagram}); toast(`Saved diagrams/${file}.`); } catch (e) { toast(e.message); }
+  };
+  $('#import').onchange = async e => {
+    const f = e.target.files[0]; e.target.value = '';
+    if (!f) return;
+    if (f.size > 1_000_000) { toast('File is larger than 1 MB.'); return; }
+    try { setDiagram(JSON.parse(await f.text())); toast('Imported. Review any MCP commands before running.'); } catch (err) { toast('Import failed: ' + err.message); }
+  };
+  $('#diagram-name').addEventListener('input', () => save());
+  $('#mode').onchange = () => changed();
+  $('#run').onclick = runDiagram;
+  $('#approve').onclick = () => decide(true);
+  $('#reject').onclick = () => decide(false);
+  $('#close-run').onclick = () => { $('#run-panel').hidden = true; };
+  document.addEventListener('keydown', e => {
+    if (e.target.closest('input,textarea,select')) return;
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selected) {
+      e.preventDefault();
+      if (selected.kind === 'block') removeBlock(selected.id); else removeWire(selected.list, selected.index);
+    }
+    if (e.key === 'Escape') select(null);
+  });
+  validate();
+}
+init();

@@ -38,6 +38,8 @@ cd bya-runtime
 python server.py        # open http://127.0.0.1:8787
 ```
 
+**Draw your own agent:** with the runtime running, open `http://127.0.0.1:8787/studio.html`. Drag blocks onto the canvas, connect them, and run. The canvas won't let you wire an output without an output check and a human approval in front of it.
+
 **Tests and evals:**
 
 ```sh
