@@ -9,7 +9,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class BlockSpec:
     type: str
-    category: str                    # trigger | agent | tool | guard | output
+    category: str                    # trigger | agent | tool | memory | guard | output
     inputs: frozenset = frozenset()  # flow types this block accepts; empty = no flow input
     output: str = None               # flow type this block emits; None = end of flow
     attachable: bool = False         # connects to an agent by attachment, never by flow
@@ -23,6 +23,11 @@ SPECS = {spec.type: spec for spec in (
     BlockSpec('tool.builtin', 'tool', attachable=True),
     BlockSpec('tool.http', 'tool', attachable=True),
     BlockSpec('tool.mcp', 'tool', attachable=True),
+    BlockSpec('memory.kv', 'memory', attachable=True),
+    BlockSpec('memory.conversation', 'memory', attachable=True),
+    BlockSpec('memory.documents', 'memory', attachable=True),
+    BlockSpec('guard.policy', 'guard', attachable=True),
+    BlockSpec('guard.redact', 'guard', inputs=frozenset({'draft'}), output='draft'),
     BlockSpec('guard.output_check', 'guard', inputs=frozenset({'draft'}), output='checked_draft'),
     BlockSpec('guard.approval', 'guard', inputs=frozenset({'checked_draft'}), output='approved_draft'),
     BlockSpec('output.file', 'output', inputs=frozenset({'approved_draft'})),
@@ -31,6 +36,7 @@ SPECS = {spec.type: spec for spec in (
 )}
 
 BUILTIN_FUNCTIONS = ('calculator', 'time_now', 'asset_lookup', 'runbook_search')
+NAMESPACE_LIMITS = {'max_entries': (1, 1000), 'max_items': (1, 20), 'max_results': (1, 10), 'max_tool_calls': (1, 200)}
 
 AGENT_LIMITS = {
     'max_steps': (1, 50),
@@ -77,6 +83,24 @@ UI = {
         _f('allow_tools', 'Only these tools', 'list', default=[], help='Empty = all tools the server offers.'),
         _f('write_tools', 'Write tools', 'list', default=[], help='Tools that change state; each call needs approval.'),
         _f('env_from', 'Environment (JSON)', 'json', default={}, help='{"SERVER_VAR": "YOUR_ENV_VAR"}')]),
+    'memory.kv': ('Fact memory', 'Lets the agent remember and recall facts across runs (remember / recall tools).', [
+        _f('namespace', 'Namespace', default='facts', help='Agents sharing a namespace share facts.'),
+        _f('max_entries', 'Max facts', 'number', default=200, min=1, max=1000)]),
+    'memory.conversation': ('Run history', 'Gives the agent the inputs and results of its last completed runs.', [
+        _f('namespace', 'Namespace', default='history'),
+        _f('max_items', 'Runs to remember', 'number', default=5, min=1, max=20)]),
+    'memory.documents': ('Document search', 'Keyword search over .md and .txt files in the knowledge folder.', [
+        _f('folder', 'Folder inside knowledge/', default='.', help='Relative path; files never leave your machine.'),
+        _f('max_results', 'Results per search', 'number', default=3, min=1, max=10)]),
+    'guard.policy': ('Permission policy', 'Limits what the attached agent may call.', [
+        _f('deny_tools', 'Never allow these tools', 'list', default=[]),
+        _f('require_approval_tools', 'Always ask before these tools', 'list', default=[],
+           help='Read tools that should still need approval.'),
+        _f('max_tool_calls', 'Max tool calls per run', 'number', default=20, min=1, max=200)]),
+    'guard.redact': ('Redact', 'Removes secrets (tokens, keys, passwords) and optionally emails and IPs from the draft.', [
+        _f('emails', 'Redact email addresses', 'checkbox', default=True),
+        _f('ipv4', 'Redact IPv4 addresses', 'checkbox', default=False),
+        _f('patterns', 'Also redact patterns', 'list', default=[], help='Regular expressions, one per line.')]),
     'guard.output_check': ('Output check', 'Blocks drafts that claim actions, assert root causes or cite unknown sources.', [
         _f('allowed_citations', 'Allowed citations', 'select', options=['', 'seen_in_tool_results'], default='seen_in_tool_results'),
         _f('require_citation', 'Require a citation', 'checkbox', default=False),

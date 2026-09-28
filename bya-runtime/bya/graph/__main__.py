@@ -55,7 +55,7 @@ def main(argv=None):
         monitoring=adapters.PrtgMonitoring(config) if args.live else adapters.SampleMonitoring(),
         approve=lambda block, draft: _ask(f'\n--- Draft ---\n{draft}\n--- End ---\nApprove at "{block.id}"?'),
         approve_tool=lambda block_id, tool, a: _ask(f'\nAgent "{block_id}" wants to call write tool "{tool}" with {json.dumps(a)}. Allow?'),
-        output_dir=ROOT / 'outputs',
+        output_dir=ROOT / 'outputs', memory_path=ROOT / 'bya.sqlite3', knowledge_dir=ROOT / 'knowledge',
     )
     try:
         state = run(diagram, ctx, args.input)

@@ -8,9 +8,11 @@ import os
 import re
 import urllib.parse
 from dataclasses import dataclass
+from pathlib import Path
 
 from .. import core, validation
 from .mcp import McpClient
+from .memory import MemoryStore, search_documents
 
 MAX_RESULT = 8_000
 
@@ -37,7 +39,42 @@ def open_tools(block, ctx):
         return [_http(block)], (lambda: None)
     if block.type == 'tool.mcp':
         return _mcp(block)
-    raise ValueError(f'Unsupported tool block "{block.type}".')
+    if block.type == 'memory.kv':
+        return _memory_kv(block, ctx), (lambda: None)
+    if block.type == 'memory.documents':
+        return [_documents(block, ctx)], (lambda: None)
+    return [], (lambda: None)  # memory.conversation and guard.policy are handled by the executor
+
+
+# --- memory --------------------------------------------------------------------
+# Memory writes stay inside the agent's own store, so they are not external write actions.
+
+def _memory_kv(block, ctx):
+    cfg, store = block.config, MemoryStore(ctx.memory_path)
+    ns, cap = cfg['namespace'], cfg.get('max_entries', 200)
+    key = {'type': 'string', 'description': 'Short key, e.g. "preferred_region".'}
+    return [
+        Tool('remember', f'Store a fact for future runs (memory "{ns}").',
+             {'type': 'object', 'properties': {'key': key, 'value': {'type': 'string'}}, 'required': ['key', 'value']},
+             'memory', lambda a: store.remember(ns, str(a.get('key', '')), a.get('value', ''), cap), block.id),
+        Tool('recall', f'Read facts stored in memory "{ns}". Omit key to list all.',
+             {'type': 'object', 'properties': {'key': key}}, 'memory',
+             lambda a: store.recall(ns, a.get('key')), block.id),
+        Tool('forget', f'Delete a fact from memory "{ns}".',
+             {'type': 'object', 'properties': {'key': key}, 'required': ['key']}, 'memory',
+             lambda a: store.forget(ns, str(a.get('key', ''))), block.id),
+    ]
+
+
+def _documents(block, ctx):
+    cfg = block.config
+    folder = (Path(ctx.knowledge_dir) / cfg.get('folder', '.')).resolve()
+    base = Path(ctx.knowledge_dir).resolve()
+    if folder != base and base not in folder.parents:
+        raise ValueError('Document folder must be inside the knowledge folder.')
+    return Tool('search_documents', 'Keyword search over local reference documents. Returns file names and snippets.',
+                {'type': 'object', 'properties': {'query': {'type': 'string'}}, 'required': ['query']}, 'read',
+                lambda a: search_documents(folder, a.get('query', ''), cfg.get('max_results', 3)), block.id)
 
 
 # --- built-ins -----------------------------------------------------------------

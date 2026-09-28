@@ -77,6 +77,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json(read('ssot.json'))
         if path == '/api/catalog':
             return self.send_json({'types': catalog()})
+        if path == '/api/diagram/pending':
+            return self.send_json({'pending': diagram_store().list_paused()})
         if path == '/api/diagrams':
             files = sorted((ROOT / 'diagrams').glob('*.json'))
             return self.send_json({'diagrams': [{'file': f.name, 'name': _diagram_name(f)} for f in files]})
@@ -177,9 +179,9 @@ def _diagram_context(mode):
     return graph.Context(
         mode=mode, ssot=read('ssot.json'), runbooks=read('runbooks.json'),
         monitoring=adapters.PrtgMonitoring(cfg) if mode == 'live' else adapters.SampleMonitoring(),
-        approve=None,        # pause at approval blocks; the reviewer decides in the canvas
-        approve_tool=None,   # write tools are denied until the approval inbox exists
-        output_dir=ROOT / 'outputs')
+        approve=None,                  # pause at approval blocks; the reviewer decides in the canvas
+        pause_for_tool_approval=True,  # write tools pause the run until approved in the inbox
+        output_dir=ROOT / 'outputs', memory_path=ROOT / 'bya.sqlite3', knowledge_dir=ROOT / 'knowledge')
 
 
 def _mode(data):

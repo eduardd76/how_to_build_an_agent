@@ -8,15 +8,17 @@ Safety rules:
   agent-limits                 every agent has a step limit, token budget and timeout
   no-secrets                   credentials are referenced by environment-variable name only
   no-sample-live               sample data sources cannot run in live mode
+  one-policy                   at most one permission policy per agent
 plus structural rules (known-type, reference, attachment, flow-wire, unreachable, unattached, config).
 """
 import re
 from dataclasses import asdict, dataclass
 
-from .catalog import AGENT_LIMITS, BUILTIN_FUNCTIONS, SPECS
+from .catalog import AGENT_LIMITS, BUILTIN_FUNCTIONS, NAMESPACE_LIMITS, SPECS
 
 ENV_NAME = re.compile(r'^[A-Z_][A-Z0-9_]*$')
 TOOL_NAME = re.compile(r'^[A-Za-z0-9_-]{1,64}$')
+NAMESPACE = re.compile(r'^[a-z0-9_-]{1,40}$')
 SECRET_KEY = re.compile(r'token|secret|password|passwd|api_?key|authorization|credential', re.I)
 SECRET_VALUE = re.compile(r'^(Bearer\s|Basic\s|xox[abp]-|sk-|ghp_|github_pat_|glpat-)', re.I)
 
@@ -98,6 +100,11 @@ def validate(diagram, mode='sample'):
     for k, b in known.items():
         if b.spec.attachable and k not in attached:
             add(k, 'unattached', 'Attach this to an agent, or remove it.')
+    for k, b in known.items():
+        if b.type == 'agent':
+            policies = [r for a, r in diagram.attachments if a == k and r in known and known[r].type == 'guard.policy']
+            if len(policies) > 1:
+                add(policies[1], 'one-policy', 'An agent can have only one permission policy; merge them.')
 
     # Outputs behind a check and an approval (explicit, even though flow types already imply it).
     for k, b in known.items():
@@ -168,6 +175,9 @@ def _env_map(value):
 
 def _check_config(b, add, mode):
     cfg, k = b.config, b.id
+    for key, (lo, hi) in NAMESPACE_LIMITS.items():
+        if key in cfg and (not isinstance(cfg[key], int) or isinstance(cfg[key], bool) or not lo <= cfg[key] <= hi):
+            add(k, 'config', f'"{key}" must be a whole number between {lo} and {hi}.')
     if b.type == 'trigger.alert':
         if cfg.get('source') not in ('sample', 'prtg'):
             add(k, 'config', 'Set "source" to "sample" or "prtg".')
@@ -203,6 +213,23 @@ def _check_config(b, add, mode):
                 add(k, 'config', f'"{key}" must be a list of tool names.')
         if 'env_from' in cfg and not _env_map(cfg['env_from']):
             add(k, 'config', '"env_from" must map variable names to environment variable names.')
+    elif b.type in ('memory.kv', 'memory.conversation'):
+        if not NAMESPACE.match(str(cfg.get('namespace', ''))):
+            add(k, 'config', '"namespace" must be 1–40 lower-case letters, digits, "_" or "-".')
+    elif b.type == 'memory.documents':
+        folder = str(cfg.get('folder', '.'))
+        if folder.startswith(('/', '\\')) or '..' in re.split(r'[\\/]', folder) or ':' in folder:
+            add(k, 'config', '"folder" must be a relative path inside the knowledge folder.')
+    elif b.type == 'guard.policy':
+        for key in ('deny_tools', 'require_approval_tools'):
+            if key in cfg and not (isinstance(cfg[key], list) and all(isinstance(t, str) for t in cfg[key])):
+                add(k, 'config', f'"{key}" must be a list of tool names.')
+    elif b.type == 'guard.redact':
+        for pattern in cfg.get('patterns', []):
+            try:
+                re.compile(pattern)
+            except (re.error, TypeError):
+                add(k, 'config', f'Invalid pattern in "patterns": {pattern!r}.')
     elif b.type == 'guard.output_check':
         allowed = cfg.get('allowed_citations')
         if allowed is not None and allowed != 'seen_in_tool_results' and not isinstance(allowed, list):

@@ -88,6 +88,20 @@ class DiagramRunStore:
                 raise
         return json.loads(row['diagram']), json.loads(row['state'])
 
+    def list_paused(self, limit=50):
+        with closing(self._connect()) as c:
+            rows = c.execute("SELECT id, created, state FROM diagram_runs WHERE status='awaiting_approval' "
+                             'ORDER BY created DESC LIMIT ?', (limit,)).fetchall()
+        items = []
+        for r in rows:
+            state = json.loads(r['state'])
+            p = state.get('pending') or {}
+            items.append({'id': r['id'], 'created': r['created'], 'diagram': state.get('diagram'),
+                          'kind': p.get('kind', 'draft'), 'block': p.get('block'), 'since': p.get('since'),
+                          'tool': p.get('tool'), 'args': p.get('args'), 'access': p.get('access'),
+                          'draft': p.get('value') if p.get('kind', 'draft') == 'draft' else None})
+        return items
+
     def update(self, rid, state):
         with closing(self._connect()) as c:
             c.execute('UPDATE diagram_runs SET state=?, status=? WHERE id=?', (json.dumps(state), state['status'], rid))

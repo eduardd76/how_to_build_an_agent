@@ -2,9 +2,9 @@
 // BYA Diagram Studio: draw an agent as blocks, attachments and flow wires; the local runtime validates and runs it.
 
 const $ = s => document.querySelector(s);
-const CATEGORIES = [['trigger', 'Triggers'], ['agent', 'Agent'], ['tool', 'Tools (attach to an agent)'], ['guard', 'Guardrails'], ['output', 'Outputs']];
-const COLORS = {trigger: 'var(--cat-trigger)', agent: 'var(--cat-agent)', tool: 'var(--cat-tool)', guard: 'var(--cat-guard)', output: 'var(--cat-output)'};
-const ID_PREFIX = {'trigger': 'start', 'agent': 'agent', 'tool': 'tool', 'guard.output_check': 'check', 'guard.approval': 'approval', 'output': 'out'};
+const CATEGORIES = [['trigger', 'Triggers'], ['agent', 'Agent'], ['tool', 'Tools (attach to an agent)'], ['memory', 'Memory (attach to an agent)'], ['guard', 'Guardrails'], ['output', 'Outputs']];
+const COLORS = {trigger: 'var(--cat-trigger)', agent: 'var(--cat-agent)', tool: 'var(--cat-tool)', memory: 'var(--cat-memory)', guard: 'var(--cat-guard)', output: 'var(--cat-output)'};
+const ID_PREFIX = {'trigger': 'start', 'agent': 'agent', 'tool': 'tool', 'memory': 'memory', 'guard.output_check': 'check', 'guard.approval': 'approval', 'guard.policy': 'policy', 'guard.redact': 'redact', 'output': 'out'};
 const STORE_KEY = 'bya-studio-diagram-v1';
 const BLOCK_W = 176;
 
@@ -127,6 +127,11 @@ function summary(b) {
     case 'tool.mcp': return `${(c.command || []).join(' ')} · ${c.access || '?'}`;
     case 'guard.approval': return `Expires in ${Math.round((c.expires_s || 3600) / 60)} min`;
     case 'guard.output_check': return c.allowed_citations === 'seen_in_tool_results' ? 'Citations from tools only' : 'Action & root-cause checks';
+    case 'memory.kv': return `Facts · ${c.namespace || '?'}`;
+    case 'memory.conversation': return `Last ${c.max_items || 5} runs · ${c.namespace || '?'}`;
+    case 'memory.documents': return `knowledge/${c.folder && c.folder !== '.' ? c.folder : ''}`;
+    case 'guard.policy': return `Max ${c.max_tool_calls || '∞'} calls` + ((c.deny_tools || []).length ? ` · denies ${c.deny_tools.length}` : '');
+    case 'guard.redact': return ['secrets', c.emails !== false ? 'emails' : '', c.ipv4 ? 'IPs' : ''].filter(Boolean).join(', ');
     case 'output.file': return c.path || '';
     case 'output.slack': return `Channel from ${c.channel_env || '?'}`;
     default: return spec(b)?.label || b.type;
@@ -230,11 +235,11 @@ function connectionProblem(list, a, b) {
   if (!sa || !sb) return 'Unknown block.';
   if (diagram[list].some(([x, y]) => x === a && y === b)) return 'These blocks are already connected.';
   if (list === 'attachments') {
-    if (A.type !== 'agent') return 'Only an agent can have tools attached.';
+    if (A.type !== 'agent') return 'Only an agent can have tools, memory or a policy attached.';
     if (!sb.attachable) return `${sb.label} is part of the flow; connect it with a flow wire, not an attachment.`;
     return null;
   }
-  if (sa.attachable || sb.attachable) return 'Tools attach to an agent (dashed line); they are not part of the flow.';
+  if (sa.attachable || sb.attachable) return 'Tools, memory and policies attach to an agent (dashed line); they are not part of the flow.';
   if (!sa.output) return `${sa.label} is an end block; nothing comes after it.`;
   if (!sb.inputs.includes(sa.output)) {
     if (sb.category === 'output') return `${sb.label} only accepts an approved draft. Put an output check and a human approval in front of it.`;
@@ -339,7 +344,7 @@ function renderInspector() {
   if (!b) {
     const n = diagram.blocks.length;
     box.innerHTML = `<p class="desc">${n ? `${n} block${n > 1 ? 's' : ''}. Select one to edit it.` : 'Add blocks from the palette.'}</p>
-      <p class="desc"><strong>Solid arrows</strong> are the flow: what happens in order.<br><strong>Dashed lines</strong> attach tools to an agent: what it may use.</p>
+      <p class="desc"><strong>Solid arrows</strong> are the flow: what happens in order.<br><strong>Dashed lines</strong> attach tools, memory and a permission policy to an agent: what it may use.</p>
       <p class="desc">Every output must come after an <strong>output check</strong> and a <strong>human approval</strong>. The canvas refuses anything else.</p>`;
     return;
   }
@@ -422,9 +427,50 @@ function renderRun(state) {
   if (state.error) rows.push(`<li class="fail">${esc(state.error)}</li>`);
   (state.violations || []).forEach(v => rows.push(`<li class="fail">${esc(typeof v === 'string' ? v : v.message)}</li>`));
   $('#trace').innerHTML = rows.join('');
-  const waiting = state.status === 'awaiting_approval';
+  const waiting = state.status === 'awaiting_approval', p = state.pending || {};
   $('#draft-box').hidden = !waiting;
-  if (waiting) $('#draft').textContent = String(state.pending?.value ?? '');
+  if (waiting) {
+    const tool = p.kind === 'tool';
+    $('#draft-title').textContent = tool ? `Agent "${p.block}" wants to call "${p.tool}" (${p.access || 'gated'})` : 'Draft waiting for your approval';
+    $('#draft').textContent = tool ? prettyArgs(p.args) : String(p.value ?? '');
+    $('#approve').textContent = tool ? 'Allow this call' : 'Approve';
+    $('#reject').textContent = tool ? 'Deny' : 'Reject';
+  }
+  refreshInbox();
+}
+function prettyArgs(args) {
+  try { return JSON.stringify(typeof args === 'string' ? JSON.parse(args) : args, null, 2); } catch { return String(args); }
+}
+
+// ---------- inbox: everything waiting for a human, across runs ----------
+async function refreshInbox() {
+  if (!token) return;
+  try {
+    const items = (await api('/api/diagram/pending')).pending;
+    $('#inbox').textContent = `Inbox (${items.length})`;
+    $('#inbox').classList.toggle('attention', items.length > 0);
+    return items;
+  } catch { return []; }
+}
+async function openInbox() {
+  const items = await refreshInbox();
+  const box = $('#inbox-panel');
+  box.hidden = false;
+  box.innerHTML = `<div class="run-head"><h2>Inbox</h2><span class="pill ${items.length ? 'wait' : 'ok'}">${items.length} waiting</span>
+    <button class="btn small" id="close-inbox" aria-label="Close inbox">×</button></div>` + (items.length ? items.map((it, i) => `
+    <div class="draft"><strong>${esc(it.diagram)} · ${it.kind === 'tool' ? `tool call "${esc(it.tool)}" by ${esc(it.block)}` : `draft at ${esc(it.block)}`}</strong>
+      <pre>${esc(it.kind === 'tool' ? prettyArgs(it.args) : it.draft)}</pre>
+      <div class="draft-actions"><button class="btn primary" data-i="${i}" data-ok="1">${it.kind === 'tool' ? 'Allow' : 'Approve'}</button>
+      <button class="btn" data-i="${i}" data-ok="0">${it.kind === 'tool' ? 'Deny' : 'Reject'}</button>
+      <span class="muted">since ${esc(new Date(it.since).toLocaleString())}</span></div></div>`).join('') : '<p class="muted">Nothing is waiting for approval.</p>');
+  $('#close-inbox').onclick = () => { box.hidden = true; };
+  box.querySelectorAll('[data-i]').forEach(btn => btn.addEventListener('click', async () => {
+    const it = items[Number(btn.dataset.i)];
+    btn.disabled = true;
+    try { const state = await api('/api/diagram/approve', {id: it.id, approved: btn.dataset.ok === '1'}); if (currentRun?.id === it.id) renderRun(state); toast(`Run ${state.status.replace('_', ' ')}.`); }
+    catch (e) { toast(e.message); }
+    openInbox();
+  }));
 }
 async function runDiagram() {
   if (running) return;
@@ -499,6 +545,8 @@ async function init() {
   $('#diagram-name').addEventListener('input', () => save());
   $('#mode').onchange = () => changed();
   $('#run').onclick = runDiagram;
+  $('#inbox').onclick = openInbox;
+  refreshInbox();
   $('#approve').onclick = () => decide(true);
   $('#reject').onclick = () => decide(false);
   $('#close-run').onclick = () => { $('#run-panel').hidden = true; };
