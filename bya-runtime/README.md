@@ -36,7 +36,15 @@ The model still never chooses steps, calls tools or picks recipients. Deliberate
 
 ## Diagrams (preview)
 
-An agent can now be described as a **diagram**: a JSON file of blocks, **attachments** (resources an agent may use) and **flow wires** (what happens in order). The runtime validates the diagram, then runs it. The canvas does not draw diagrams yet; for now you write the JSON or start from `diagrams/incident-brief.json`.
+An agent can be described as a **diagram**: blocks, **attachments** (resources an agent may use) and **flow wires** (what happens in order). The runtime validates the diagram, then runs it.
+
+**Diagram Studio** (`http://127.0.0.1:8787/studio.html`, or **Diagram studio** in the left menu) is the canvas for this:
+- Add blocks from the palette by clicking or dragging.
+- Drag from a block's right-hand port to create a flow wire, or from an agent's bottom port to attach a tool.
+- Edit settings in the right-hand panel.
+- Run the diagram and approve the draft in the run panel.
+
+The canvas refuses connections the rules never allow, and says why (for example, an agent wired straight to an output). Every other problem is listed below the canvas and marked on its block. Diagrams save to `diagrams/`, and can be imported and exported as JSON.
 
 ```
 [Trigger] ──▶ [Agent] ──▶ [Output check] ──▶ [Human approval] ──▶ [Output]
@@ -76,7 +84,12 @@ python -m bya.graph validate diagrams/incident-brief.json
 LLM_MODEL=llama3.1:8b python -m bya.graph run diagrams/incident-brief.json   # approvals asked in the terminal
 ```
 
-Current limits: MCP over stdio only (no remote MCP yet); no memory blocks yet; approvals happen in the terminal or through the `resume()` API; runs are not yet stored in `bya.sqlite3`.
+Current limits:
+- MCP servers must be local (stdio); remote MCP isn't supported yet.
+- No memory blocks yet.
+- In the studio, write tools are always refused until an approval inbox exists; in the terminal you're asked per call.
+
+**Imported diagrams can start local programs.** An MCP block runs its command when the diagram runs, and the studio shows that command on the block's settings panel. Only run diagrams and MCP servers you trust.
 
 ## Start
 

@@ -37,3 +37,63 @@ AGENT_LIMITS = {
     'token_budget': (1_000, 1_000_000),
     'timeout_s': (5, 3_600),
 }
+
+
+# --- Canvas metadata: labels and settings forms (the validator is the source of truth for rules) ---
+
+def _f(key, label, kind='text', **extra):
+    return {'key': key, 'label': label, 'kind': kind, **extra}
+
+
+UI = {
+    'trigger.manual': ('Manual start', 'Start a run by hand, with optional text input.',
+                       [_f('default_input', 'Default input', 'textarea')]),
+    'trigger.webhook': ('Webhook', 'Start a run with a JSON payload.', []),
+    'trigger.alert': ('Monitoring alert', 'Start from one monitoring sensor.', [
+        _f('source', 'Source', 'select', options=['sample', 'prtg'], default='sample'),
+        _f('sensor_id', 'Sensor ID', default='1001')]),
+    'agent': ('Agent', 'A model that reasons in a loop and calls its attached tools.', [
+        _f('instructions', 'Instructions', 'textarea', default='Describe the job, the evidence to gather and the answer format.'),
+        _f('model_url', 'Model endpoint', default='http://127.0.0.1:11434/v1', help='OpenAI-compatible URL (Ollama, vLLM, llama.cpp).'),
+        _f('model', 'Model', help='Leave empty to use the LLM_MODEL environment variable.'),
+        _f('api_key_env', 'API key variable', help='Name of an environment variable; never the key itself.'),
+        _f('max_steps', 'Max steps', 'number', default=8, min=1, max=50),
+        _f('token_budget', 'Token budget', 'number', default=40000, min=1000, max=1000000),
+        _f('timeout_s', 'Timeout (seconds)', 'number', default=180, min=5, max=3600)]),
+    'tool.builtin': ('Built-in tools', 'Calculator, time, asset lookup and runbook search. Read-only.', [
+        _f('functions', 'Functions', 'multiselect', options=list(BUILTIN_FUNCTIONS), default=['asset_lookup', 'runbook_search']),
+        _f('access', 'Access', 'select', options=['read'], default='read')]),
+    'tool.http': ('HTTP tool', 'Call a JSON API. Headers come from environment variables.', [
+        _f('name', 'Tool name', default='get_data'),
+        _f('description', 'When to use it', 'textarea', default='Describe when the agent should call this.'),
+        _f('method', 'Method', 'select', options=['GET', 'POST'], default='GET'),
+        _f('url', 'URL', default='https://', help='Use {param} for path parameters.'),
+        _f('access', 'Access', 'select', options=['read', 'write'], default='read'),
+        _f('parameters', 'Parameters (JSON Schema)', 'json', default={'type': 'object', 'properties': {}}),
+        _f('headers_env', 'Headers from env (JSON)', 'json', default={})]),
+    'tool.mcp': ('MCP server', 'Tools from a local MCP server (stdio).', [
+        _f('command', 'Command', 'list', default=['python', 'server.py'], help='One argument per line.'),
+        _f('access', 'Access', 'select', options=['read', 'write'], default='read'),
+        _f('allow_tools', 'Only these tools', 'list', default=[], help='Empty = all tools the server offers.'),
+        _f('write_tools', 'Write tools', 'list', default=[], help='Tools that change state; each call needs approval.'),
+        _f('env_from', 'Environment (JSON)', 'json', default={}, help='{"SERVER_VAR": "YOUR_ENV_VAR"}')]),
+    'guard.output_check': ('Output check', 'Blocks drafts that claim actions, assert root causes or cite unknown sources.', [
+        _f('allowed_citations', 'Allowed citations', 'select', options=['', 'seen_in_tool_results'], default='seen_in_tool_results'),
+        _f('require_citation', 'Require a citation', 'checkbox', default=False),
+        _f('block_patterns', 'Also block patterns', 'list', default=[], help='Regular expressions, one per line.')]),
+    'guard.approval': ('Human approval', 'Pauses the run until a person approves the exact draft.', [
+        _f('expires_s', 'Expires after (seconds)', 'number', default=3600, min=60, max=86400)]),
+    'output.file': ('Save to file', 'Write the approved draft to a file in the output folder.', [
+        _f('path', 'Path', default='briefs/output.md')]),
+    'output.webhook': ('Webhook out', 'POST the approved draft to an HTTPS endpoint.', [
+        _f('url', 'URL', default='https://'), _f('headers_env', 'Headers from env (JSON)', 'json', default={})]),
+    'output.slack': ('Slack', 'Post the approved draft to one Slack channel.', [
+        _f('channel_env', 'Channel variable', default='SLACK_CHANNEL')]),
+}
+
+
+def catalog():
+    """Everything the canvas needs to render the palette, ports and settings forms."""
+    return [{'type': s.type, 'category': s.category, 'label': UI[s.type][0], 'description': UI[s.type][1],
+             'inputs': sorted(s.inputs), 'output': s.output, 'attachable': s.attachable, 'fields': UI[s.type][2]}
+            for s in SPECS.values()]
