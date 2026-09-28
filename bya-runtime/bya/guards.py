@@ -19,18 +19,22 @@ PROBABILITY = re.compile(
 
 
 def check(text, allowed_runbooks, require_citation=False):
-    """Return a list of human-readable violations; empty means the text may go to review."""
+    """Return a list of human-readable violations; empty means the text may go to review.
+
+    `allowed_runbooks=None` skips the citation checks (for flows that do not use runbook IDs).
+    """
     violations = []
     if not text or not text.strip():
         return ['Model returned an empty draft.']
     if len(text) > MAX_CHARS:
         violations.append(f'Draft exceeds {MAX_CHARS} characters.')
-    cited = set(RUNBOOK_ID.findall(text))
-    unknown = sorted(cited - set(allowed_runbooks))
-    if unknown:
-        violations.append('Cites runbooks not mapped to this asset: ' + ', '.join(unknown) + '.')
-    if require_citation and allowed_runbooks and not cited:
-        violations.append('Does not cite any mapped runbook.')
+    if allowed_runbooks is not None:
+        cited = set(RUNBOOK_ID.findall(text))
+        unknown = sorted(cited - set(allowed_runbooks))
+        if unknown:
+            violations.append('Cites runbooks not mapped to this asset: ' + ', '.join(unknown) + '.')
+        if require_citation and allowed_runbooks and not cited:
+            violations.append('Does not cite any mapped runbook.')
     if ACTION_CLAIM.search(text):
         violations.append('Claims an action was taken; this agent is read-only.')
     if ROOT_CAUSE.search(text):

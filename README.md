@@ -55,6 +55,8 @@ examples/
   agent.py          Complete example agent: approval gate, limits, tracing, error recovery
 bya-runtime/
   bya/              Pipeline, adapters, output checks, forecasting, delivery state machine
+  bya/graph/        Diagram runtime: validator, executor, built-in/HTTP/MCP tools
+  diagrams/         Example agent diagrams
   evals/            Fixed-evidence evals, including prompt-injection cases
   tests/            Unit and HTTP tests
   web/              Local builder UI

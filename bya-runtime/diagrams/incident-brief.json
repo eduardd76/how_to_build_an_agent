@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "name": "Incident brief",
+  "blocks": [
+    {"id": "alert", "type": "trigger.alert", "config": {"source": "sample", "sensor_id": "1001"}},
+    {"id": "triage", "type": "agent", "config": {
+      "instructions": "You are a read-only network operations analyst. Look up the alerting sensor in the asset register, fetch the runbooks mapped to that asset, and write a short incident brief: what is observed, the affected service and owner, suggested read-only checks citing runbook ids exactly as returned, and what is still uncertain. Do not guess a root cause.",
+      "model_url": "http://127.0.0.1:11434/v1",
+      "max_steps": 8,
+      "token_budget": 40000,
+      "timeout_s": 180
+    }},
+    {"id": "lookups", "type": "tool.builtin", "config": {"functions": ["asset_lookup", "runbook_search"], "access": "read"}},
+    {"id": "check", "type": "guard.output_check", "config": {"allowed_citations": "seen_in_tool_results", "require_citation": true}},
+    {"id": "review", "type": "guard.approval", "config": {"expires_s": 3600}},
+    {"id": "save", "type": "output.file", "config": {"path": "briefs/incident-brief.md"}}
+  ],
+  "attachments": [["triage", "lookups"]],
+  "flow": [["alert", "triage"], ["triage", "check"], ["check", "review"], ["review", "save"]],
+  "layout": {
+    "alert": {"x": 40, "y": 200}, "triage": {"x": 300, "y": 200}, "lookups": {"x": 300, "y": 40},
+    "check": {"x": 560, "y": 200}, "review": {"x": 800, "y": 200}, "save": {"x": 1040, "y": 200}
+  }
+}
