@@ -16,6 +16,8 @@ bya/prompts.py       Every model instruction, versioned (PROMPT_VERSION is store
 bya/guards.py        Deterministic checks on model text before a human reviews it
 bya/store.py         Run history and the delivery state machine
 evals/               Fixed-evidence evaluation of incident briefs and forecast explanations
+bya/graph/           Diagram runtime: block catalogue, validator, executor, tools (built-in, HTTP, MCP)
+diagrams/            Example diagrams
 ```
 
 Flow of an incident brief: SSOT → Knowledge → Monitoring → Analysis (model) → Output checks → Delivery policy → human approval → Slack.
@@ -31,6 +33,50 @@ What changed from 0.1 and why:
 7. **Smaller fixes.** The triage template no longer requires forecast settings. A malformed local-model response gives a clear error instead of a `KeyError`. Errors name the step that failed (for example `SSOT: ...`). Sample drafts no longer quote free-text alert messages, which may contain injected instructions.
 
 The model still never chooses steps, calls tools or picks recipients. Deliberately, this is a workflow with a model in it, not an autonomous agent: the steps are known in advance and a wrong action is costly.
+
+## Diagrams (preview)
+
+An agent can now be described as a **diagram**: a JSON file of blocks, **attachments** (resources an agent may use) and **flow wires** (what happens in order). The runtime validates the diagram, then runs it. The canvas does not draw diagrams yet; for now you write the JSON or start from `diagrams/incident-brief.json`.
+
+```
+[Trigger] ──▶ [Agent] ──▶ [Output check] ──▶ [Human approval] ──▶ [Output]
+                 ┊
+        attached: tools (built-in, HTTP, MCP)
+```
+
+| Category | Block types |
+|---|---|
+| Trigger | `trigger.manual`, `trigger.webhook`, `trigger.alert` (sample or PRTG) |
+| Agent | `agent`: instructions, model endpoint, `max_steps`, `token_budget`, `timeout_s` |
+| Tool (attached) | `tool.builtin` (calculator, time, asset lookup, runbook search), `tool.http`, `tool.mcp` (local MCP servers over stdio) |
+| Guardrail | `guard.output_check`, `guard.approval` |
+| Output | `output.file`, `output.webhook`, `output.slack` |
+
+**The validator refuses to run a diagram that breaks a safety rule:**
+- exactly one trigger, no loops in the flow
+- only compatible blocks can be wired together
+- every output comes after an output check and then a human approval
+- write tools always need approval for each call
+- every agent has step, token and time limits
+- credentials appear only as environment-variable names
+- no sample data in live mode
+
+Every problem names the block it belongs to.
+
+**While it runs:**
+- Tool results are passed to the model as data, never as instructions.
+- A write tool that isn't approved is refused.
+- The output check can require that runbook citations come only from what the tools actually returned.
+- Every step and tool call is recorded in the trace.
+
+**Try it:**
+
+```sh
+python -m bya.graph validate diagrams/incident-brief.json
+LLM_MODEL=llama3.1:8b python -m bya.graph run diagrams/incident-brief.json   # approvals asked in the terminal
+```
+
+Current limits: MCP over stdio only (no remote MCP yet); no memory blocks yet; approvals happen in the terminal or through the `resume()` API; runs are not yet stored in `bya.sqlite3`.
 
 ## Start
 
