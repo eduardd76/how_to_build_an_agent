@@ -1,0 +1,8 @@
+{
+  "schema_version": "0.1",
+  "assets": [
+    {"id":"device-001","name":"munich-edge-01","site":"Munich / HQ","owner":"Network Operations","service":"Corporate WAN","source":"Sample asset register","sample":true,"verified_at":"2026-09-27T09:00:00+00:00","runbook_ids":["RB-WAN-01","RB-IF-02"],"sensors":[{"id":"1001","channel":"Traffic Total","unit":"%"}]},
+    {"id":"device-002","name":"dc-core-02","site":"Frankfurt / DC","owner":"Infrastructure Operations","service":"Customer application platform","source":"Sample asset register","sample":true,"verified_at":"2026-09-27T09:00:00+00:00","runbook_ids":["RB-IF-02"],"sensors":[{"id":"1002","channel":"CPU Load","unit":"%"}]},
+    {"id":"device-003","name":"storage-01","site":"Munich / HQ","owner":"Platform Operations","service":"Internal document service","source":"Sample asset register","sample":true,"verified_at":"2026-09-27T09:00:00+00:00","runbook_ids":["RB-STORAGE-01"],"sensors":[{"id":"1003","channel":"Free Space","unit":"GB"}]}
+  ]
+}

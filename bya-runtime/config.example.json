@@ -1,0 +1,8 @@
+{
+  "model_url": "http://127.0.0.1:11434/v1",
+  "model": "REPLACE_WITH_INSTALLED_MODEL_ID",
+  "prtg_url": "https://prtg.example.internal",
+  "prtg_timezone": "Europe/Berlin",
+  "history_hours": 72,
+  "slack_channel": "REPLACE_WITH_APPROVED_CHANNEL_ID"
+}

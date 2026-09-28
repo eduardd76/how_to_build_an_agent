@@ -1,0 +1,2 @@
+# Optional; base runtime uses Python's standard library only.
+timesfm[torch]==2.0.2

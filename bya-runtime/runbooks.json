@@ -1,0 +1,5 @@
+[
+ {"id":"RB-WAN-01","title":"Elevated WAN utilization","source":"BYA sample procedure — replace with approved operational content","steps":["Compare current load with normal traffic for the same business period.","Check loss, latency and error counters through approved read-only monitoring views.","Check planned transfers and change windows with the service owner.","Record evidence and request engineer review; do not change routing or QoS."]},
+ {"id":"RB-IF-02","title":"Interface evidence checklist","source":"BYA sample procedure — replace with approved operational content","steps":["Verify the sensor-to-interface mapping and measurement units.","Review operational state, discards, errors and recent flaps.","Compare peer observations if available. Missing data is not a healthy result."]},
+ {"id":"RB-STORAGE-01","title":"Storage capacity review","source":"BYA sample procedure — replace with approved operational content","steps":["Verify free-space units, retention policy and planned ingest.","Compare recent growth with the same time on prior days.","Ask the platform owner to review capacity; do not delete files automatically."]}
+]
