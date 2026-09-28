@@ -6,7 +6,6 @@ block. A paused run returns a JSON-serialisable state; `resume()` continues it a
 import datetime as dt
 import json
 import os
-import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -304,27 +303,9 @@ def _call_tool(block, call, tools, ctx, state, policy, decision=None):
     return result
 
 
-REDACTIONS = [
-    ('token', re.compile(r'(?i)\bbearer\s+[a-z0-9._~+/=-]{8,}')),
-    ('key', re.compile(r'\b(?:sk-[A-Za-z0-9_-]{16,}|xox[abpr]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}|glpat-[A-Za-z0-9_-]{20,})')),
-    ('secret', re.compile(r'(?i)\b(password|passwd|secret|api[_-]?key|token)\s*[:=]\s*\S+')),
-]
-EMAIL = re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b')
-IPV4 = re.compile(r'\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b')
-
-
 def _redact(block, value, diagram, ctx, state):
-    cfg, text, counts = block.config, str(value), {}
-    rules = list(REDACTIONS)
-    if cfg.get('emails', True):
-        rules.append(('email', EMAIL))
-    if cfg.get('ipv4', False):
-        rules.append(('ip', IPV4))
-    rules += [('pattern', re.compile(p)) for p in cfg.get('patterns', [])]
-    for label, rx in rules:
-        text, n = rx.subn(f'[REDACTED {label}]', text)
-        if n:
-            counts[label] = counts.get(label, 0) + n
+    cfg = block.config
+    text, counts = guards.redact(str(value), cfg.get('emails', True), cfg.get('ipv4', False), cfg.get('patterns', []))
     detail = ('Redacted ' + ', '.join(f'{n} {k}' for k, n in counts.items())) if counts else 'Nothing to redact'
     return detail, text
 
@@ -334,10 +315,7 @@ def _output_check(block, value, diagram, ctx, state):
     allowed = cfg.get('allowed_citations')
     if allowed == 'seen_in_tool_results':
         allowed = state['seen_citations']
-    problems = guards.check(str(value), allowed, require_citation=cfg.get('require_citation', False))
-    for pattern in cfg.get('block_patterns', []):
-        if re.search(pattern, str(value), re.I):
-            problems.append(f'Matches blocked pattern {pattern!r}.')
+    problems = guards.check_draft(value, allowed, cfg.get('require_citation', False), cfg.get('block_patterns', []))
     if problems:
         state.update(status='blocked', violations=problems)
         return f'Blocked: {" ".join(problems)}', None
