@@ -39,7 +39,7 @@ class BuildTests(unittest.TestCase):
                          ('trigger.alert', 'guard.output_check', 'guard.approval', 'output.file'))
         self.assertEqual({b for a, b in doc['attachments']}, {'lookups', 'devices', 'runbooks', 'history'})
         dev = next(b for b in doc['blocks'] if b['id'] == 'devices')['config']
-        self.assertEqual(dev['allow'], ['show interfaces *', 'show logging | include *'])
+        self.assertEqual(dev['allow'], ['show interfaces *', 'show interface *', 'show logging | include *'])
         self.assertEqual(dev['access'], 'read')
         check = next(b for b in doc['blocks'] if b['id'] == 'check')['config']
         self.assertTrue(check['require_citation'])

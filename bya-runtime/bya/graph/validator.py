@@ -226,10 +226,13 @@ def _check_config(b, add, mode):
                 for problem in pattern_problems(pattern):
                     add(k, 'device-read-only', problem)
         source = cfg.get('scope_source', 'ssot')
-        if source not in ('ssot', 'netbox', 'list'):
-            add(k, 'config', '"scope_source" must be ssot, netbox or list.')
+        if source not in ('ssot', 'netbox', 'list', 'containerlab'):
+            add(k, 'config', '"scope_source" must be ssot, netbox, list or containerlab.')
         elif source == 'list' and not (isinstance(cfg.get('devices'), list) and cfg['devices']):
             add(k, 'device-read-only', 'List the devices this agent may read.')
+        elif source == 'containerlab':
+            if not str(cfg.get('clab_topology', '')).endswith('.json'):
+                add(k, 'config', 'Set "clab_topology" to the lab\'s topology-data.json (for example containerlab/clab-bya/topology-data.json).')
         elif source != 'list' and not (isinstance(cfg.get('scope_filter'), dict) and cfg['scope_filter']):
             add(k, 'device-read-only', 'Set a device filter; an empty filter would give the agent every device.')
         t = cfg.get('timeout_s', 20)

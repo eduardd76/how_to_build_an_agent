@@ -678,9 +678,13 @@ function wizBind(el) {
     path.slice(0, -1).forEach(k => { o = o[k]; });
     o[path.at(-1)] = v;
   }
-  if (['shape', 'devicesOn', 'mcpOn', 'devices.source', 'output.kind', 'asset_register', 'runbooks', 'forecast', 'configs', 'devices.commands'].includes(el.dataset.bind)) {
+  if (['shape', 'devicesOn', 'mcpOn', 'devices.source', 'devices.clab_topology', 'output.kind', 'asset_register', 'runbooks', 'forecast', 'configs', 'devices.commands'].includes(el.dataset.bind)) {
     const focusSel = el.dataset.cmd ? `[data-cmd="${el.dataset.cmd}"]` : `[data-bind="${el.dataset.bind}"]${el.type === 'radio' ? `[value="${el.value}"]` : ''}`;
-    if (el.dataset.bind === 'devices.source') s.devices.filter = s.devices.source === 'netbox' ? {site: wizOpts.netbox.sites[0]?.slug || '', role: wizOpts.netbox.roles[0]?.slug || ''} : {site: wizOpts.asset_sites[0] || ''};
+    if (el.dataset.bind === 'devices.source') {
+      s.devices.filter = s.devices.source === 'netbox' ? {site: wizOpts.netbox.sites[0]?.slug || '', role: wizOpts.netbox.roles[0]?.slug || ''}
+        : s.devices.source === 'containerlab' ? {} : {site: wizOpts.asset_sites[0] || ''};
+      if (s.devices.source === 'containerlab') s.devices.clab_topology = wizOpts.labs[0] || '';
+    }
     if (el.dataset.bind === 'shape') { s.forecast = s.shape === 'report'; s.configs = s.shape === 'review'; }
     renderBuilder();
     $(focusSel)?.focus();
@@ -725,12 +729,14 @@ function wizStep2() {
   const scope = d.source === 'netbox'
     ? `<label class="wiz-field">Site <select data-bind="devices.filter.site">${nb.sites.map(x => opt(x.slug, d.filter.site, x.name)).join('')}</select></label>
        <label class="wiz-field">Role <select data-bind="devices.filter.role">${nb.roles.map(x => opt(x.slug, d.filter.role, x.name)).join('')}</select></label>`
+    : d.source === 'containerlab'
+      ? `<label class="wiz-field span2">Lab <select data-bind="devices.clab_topology">${wizOpts.labs.map(x => opt(x, d.clab_topology)).join('')}</select></label>`
     : d.source === 'list'
       ? `<label class="wiz-field span2">Device names, one per line <textarea rows="2" data-bind="devices.devices" data-list>${esc(d.devices.join('\n'))}</textarea></label>`
       : `<label class="wiz-field">Site (asset register) <select data-bind="devices.filter.site">${wizOpts.asset_sites.map(x => opt(x, d.filter.site)).join('')}</select></label><span></span>`;
   const card = (bind, on, title, sub, extra = '') => `<div class="wiz-card wide ${on ? 'on' : ''}"><label class="wiz-check"><input type="checkbox" data-bind="${bind}" ${on ? 'checked' : ''}><span><strong>${title}</strong><small>${sub}</small></span></label>${on ? extra : ''}</div>`;
   const devices = card('devicesOn', s.devicesOn, 'Devices', 'read-only commands over SSH', `
-    <div class="wiz-grid three"><label class="wiz-field">Devices from <select data-bind="devices.source">${opt('ssot', d.source, 'Asset register')}${nb.configured ? opt('netbox', d.source, 'NetBox') : ''}${opt('list', d.source, 'A list I type')}</select></label>${scope}</div>
+    <div class="wiz-grid three"><label class="wiz-field">Devices from <select data-bind="devices.source">${opt('ssot', d.source, 'Asset register')}${nb.configured ? opt('netbox', d.source, 'NetBox') : ''}${(wizOpts.labs || []).length ? opt('containerlab', d.source, 'My containerlab lab') : ''}${opt('list', d.source, 'A list I type')}</select></label>${scope}</div>
     ${nb.error ? `<p class="warn">NetBox: ${esc(nb.error)}</p>` : ''}
     <div class="wiz-field">It may run</div><div class="wiz-chips">${wizOpts.commands.map(c => `<label class="chip ${d.commands.includes(c.id) ? 'on' : ''}"><input type="checkbox" data-bind="devices.commands" data-cmd="${c.id}" ${d.commands.includes(c.id) ? 'checked' : ''}>${esc(c.label)}</label>`).join('')}</div>
     <p class="wiz-note mono">${esc(wizOpts.commands.filter(c => d.commands.includes(c.id)).flatMap(c => c.patterns).join(' · ') || 'No commands chosen')}</p>`);

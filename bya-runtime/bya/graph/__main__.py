@@ -5,6 +5,7 @@
     python -m bya.graph eval diagrams/incident-brief.json [--repeat N] [--export]
     python -m bya.graph export diagrams/incident-brief.json [-o incident-brief.py]
     python -m bya.graph reach diagrams/interface-check.json [--live]
+    python -m bya.graph record containerlab/clab-bya/topology-data.json [--commands containerlab/record-commands.json]
 
 Run from the bya-runtime directory. Approvals are asked for in the terminal.
 """
@@ -17,12 +18,17 @@ from .. import adapters
 from . import Context, DiagramError, DiagramInvalid, StepFailed, evals, load_file, run, validate
 from .export import export_python
 from .reach import reach
+from .record import record
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
 def _read(name):
     return json.loads((ROOT / name).read_text())
+
+
+def _read_path(path):
+    return json.loads(Path(path).read_text())
 
 
 def _ask(question):
@@ -62,15 +68,29 @@ def _print_reach(r):
 
 def main(argv=None):
     p = argparse.ArgumentParser(prog='python -m bya.graph')
-    p.add_argument('command', choices=['validate', 'run', 'eval', 'export', 'reach'])
+    p.add_argument('command', choices=['validate', 'run', 'eval', 'export', 'reach', 'record'])
     p.add_argument('diagram')
     p.add_argument('--live', action='store_true', help='live mode: real data sources only')
     p.add_argument('--input', default=None, help='input for a manual trigger')
     p.add_argument('--repeat', type=int, default=1, help='eval: runs per case (1-5)')
     p.add_argument('--export', action='store_true', help='eval: also evaluate the exported script and compare')
     p.add_argument('-o', '--output', default=None, help='export: file to write (default: print)')
+    p.add_argument('--commands', default=None, help='record: JSON file mapping node kind to commands')
     args = p.parse_args(argv)
     mode = 'live' if args.live else 'sample'
+
+    if args.command == 'record':  # here "diagram" is the lab's topology-data.json
+        commands = _read_path(args.commands) if args.commands else None
+        try:
+            report = record(args.diagram, ROOT / 'lab', commands, ROOT)
+        except ValueError as e:
+            print(e)
+            return 2
+        for node, cmd, status in report:
+            print(f'  {node:<12} {status:<10} {cmd}' if status == 'saved' else f'  {node:<12} {cmd}: {status}')
+        saved = sum(1 for r in report if r[2] == 'saved')
+        print(f'{saved} of {len(report)} outputs saved to lab/. Sample mode now replays them.')
+        return 0 if saved else 1
 
     try:
         diagram = load_file(args.diagram)

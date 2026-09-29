@@ -1,0 +1,16 @@
+{
+  "name": "bya",
+  "type": "clab",
+  "clab": {"config": {"prefix": "clab", "mgmt": {"network": "clab", "ipv4-subnet": "172.20.20.0/24"}}},
+  "nodes": {
+    "srl1": {"index": "0", "shortname": "srl1", "longname": "clab-bya-srl1", "fqdn": "srl1.bya.io", "group": "", "labdir": "/lab/clab-bya/srl1",
+             "kind": "nokia_srlinux", "image": "ghcr.io/nokia/srlinux:latest", "mgmt-net": "", "mgmt-intf": "", "mgmt-ipv4-address": "172.20.20.2"},
+    "srl2": {"index": "1", "shortname": "srl2", "longname": "clab-bya-srl2", "kind": "nokia_srlinux", "mgmt-ipv4-address": "172.20.20.3"},
+    "frr1": {"index": "2", "shortname": "frr1", "longname": "clab-bya-frr1", "kind": "linux", "image": "quay.io/frrouting/frr:10.1.0", "mgmt-ipv4-address": "172.20.20.4"}
+  },
+  "links": [
+    {"a": {"node": "srl1", "interface": "e1-1"}, "z": {"node": "srl2", "interface": "e1-1"}},
+    {"a": {"node": "srl1", "interface": "e1-2"}, "z": {"node": "frr1", "interface": "eth1"}},
+    {"a": {"node": "srl2", "interface": "e1-2"}, "z": {"node": "frr1", "interface": "eth2"}}
+  ]
+}

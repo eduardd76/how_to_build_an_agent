@@ -86,8 +86,9 @@ UI = {
         _f('write_tools', 'Write tools', 'list', default=[], help='Tools that change state; each call needs approval.'),
         _f('env_from', 'Environment (JSON)', 'json', default={}, help='{"SERVER_VAR": "YOUR_ENV_VAR"}')]),
     'tool.device': ('Device commands', 'Read-only commands on network devices over SSH, through a command filter.', [
-        _f('scope_source', 'Devices from', 'select', options=['ssot', 'netbox', 'list'], default='ssot',
-           help='Asset register, NetBox, or a fixed list.'),
+        _f('scope_source', 'Devices from', 'select', options=['ssot', 'netbox', 'list', 'containerlab'], default='ssot',
+           help='Asset register, NetBox, a fixed list, or a deployed containerlab lab.'),
+        _f('clab_topology', 'containerlab topology data', default='', help='containerlab source: clab-<lab>/topology-data.json'),
         _f('scope_filter', 'Device filter (JSON)', 'json', default={'site': 'Munich / HQ'},
            help='Asset register: site, owner, service, name. NetBox: site, role, tag (slugs).'),
         _f('devices', 'Devices (list source)', 'list', default=[]),

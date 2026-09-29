@@ -280,6 +280,7 @@ def builder_options():
            'sensors': [{'id': str(s['id']), 'label': f"{a['name']} · {s['channel']}", 'site': a.get('site', '')}
                        for a in assets for s in a.get('sensors', [])],
            'configs': sorted(p.name for p in (ROOT / 'configs').glob('*.cfg')),
+           'labs': sorted(str(p.relative_to(ROOT)) for p in (ROOT / 'containerlab').glob('clab-*/topology-data.json')),
            'netbox': {'configured': bool(os.environ.get('NETBOX_URL') and os.environ.get('NETBOX_TOKEN')), 'sites': [], 'roles': []}}
     if out['netbox']['configured']:
         base, auth = os.environ['NETBOX_URL'].rstrip('/'), {'Authorization': f"Token {os.environ['NETBOX_TOKEN']}"}

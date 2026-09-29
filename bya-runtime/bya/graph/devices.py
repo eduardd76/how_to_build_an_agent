@@ -8,7 +8,8 @@ A command runs only when all of these hold:
   - it has no command separators, redirects or output pipes other than read-only filters
   - it matches nothing in the always-deny list
 Sample mode never contacts a device: it replays recorded outputs from lab/<device>/.
-Live mode runs the command over the jump host's OpenSSH client (its keys, config and known_hosts).
+Live mode runs the command over the jump host's OpenSSH client (its keys, config and known_hosts), or, for a
+containerlab lab, with `docker exec` into the node's container and its own CLI (sr_cli, vtysh, Cli).
 """
 import fnmatch
 import json
@@ -103,11 +104,64 @@ def resolve_scope(cfg, ctx):
                 devices[a['name']] = a.get('mgmt_address') or a['name']
     elif source == 'netbox':
         devices = _netbox_devices(cfg, filt)
+    elif source == 'containerlab':
+        devices = {name: node['container'] for name, node in clab_nodes(cfg, ctx).items()}
     else:
         raise ValueError(f'Unknown scope source "{source}".')
     if len(devices) > MAX_DEVICES:
         raise ValueError(f'The scope matches {len(devices)} devices; the limit is {MAX_DEVICES}. Narrow the filter.')
     return devices
+
+
+# --- containerlab -------------------------------------------------------------------
+
+CLAB_CLI = {  # node kind -> how to run one read-only command inside its container (no shell involved)
+    'nokia_srlinux': lambda c, cmd: ['docker', 'exec', c, 'sr_cli', cmd],
+    'srl': lambda c, cmd: ['docker', 'exec', c, 'sr_cli', cmd],
+    'arista_ceos': lambda c, cmd: ['docker', 'exec', c, 'Cli', '-c', cmd],
+    'ceos': lambda c, cmd: ['docker', 'exec', c, 'Cli', '-c', cmd],
+    'linux': lambda c, cmd: ['docker', 'exec', c, 'vtysh', '-c', cmd],   # FRR images
+}
+
+
+def runtime_root(ctx):
+    return Path(ctx.knowledge_dir).parent
+
+
+def clab_nodes(cfg, ctx):
+    """Nodes of a deployed containerlab lab, from the topology-data.json containerlab writes next to the lab.
+    Returns {short name: {"container", "kind", "mgmt"}}; an optional scope_filter {"kind": ...} narrows it."""
+    path = Path(str(cfg.get('clab_topology', '')))
+    path = path if path.is_absolute() else runtime_root(ctx) / path
+    if not path.is_file():
+        raise ValueError(f'No containerlab topology data at "{cfg.get("clab_topology")}". Deploy the lab first '
+                         f'(it writes clab-<lab>/topology-data.json).')
+    doc = json.loads(path.read_text())
+    want = {k: str(v).lower() for k, v in (cfg.get('scope_filter') or {}).items()}
+    nodes = {}
+    for key, n in (doc.get('nodes') or {}).items():
+        name = n.get('shortname') or key
+        kind = str(n.get('kind', '')).lower()
+        if want.get('kind') and kind != want['kind']:
+            continue
+        nodes[name] = {'container': n.get('longname') or f'clab-{doc.get("name", "lab")}-{name}', 'kind': kind,
+                       'mgmt': n.get('mgmt-ipv4-address') or n.get('mgmt-ipv4') or ''}
+    return nodes
+
+
+def docker_exec_output(container, kind, command, timeout_s=20):
+    build = CLAB_CLI.get(kind)
+    if build is None:
+        raise ValueError(f'BYA has no read-only command line for containerlab kind "{kind}"; use SSH for it.')
+    try:
+        done = subprocess.run(build(container, command), capture_output=True, text=True, timeout=timeout_s)
+    except FileNotFoundError:
+        raise ValueError('The docker command is not installed on this host.') from None
+    except subprocess.TimeoutExpired:
+        raise ValueError(f'No answer from {container} within {timeout_s} s.') from None
+    if done.returncode != 0 and not done.stdout:
+        raise ValueError(f'docker exec {container} failed: {done.stderr.strip()[:300] or "exit " + str(done.returncode)}')
+    return done.stdout
 
 
 def _netbox_devices(cfg, filt):
@@ -147,6 +201,9 @@ def sample_output(lab_dir, device, command):
     """Replay a recording. Interface abbreviations match (Gi0/1 = GigabitEthernet0/1); a command that extends a
     recorded one gets that recording, labelled as the closest match."""
     folder = Path(lab_dir) / device
+    direct = folder / f'{slug(command)}.txt'
+    if direct.is_file():  # recorded under exactly this command
+        return direct.read_text(errors='replace')
     index = folder / 'commands.json'
     recorded = json.loads(index.read_text()) if index.is_file() else []
     wanted = _canonical(command)
@@ -185,6 +242,8 @@ class DeviceReader:
         self.cfg, self.ctx = cfg, ctx
         self.allow = [normalize(p) for p in cfg.get('allow', [])]
         self.devices = resolve_scope(cfg, ctx)
+        self.kinds = ({n: node['kind'] for n, node in clab_nodes(cfg, ctx).items()}
+                      if cfg.get('scope_source') == 'containerlab' else {})
         self.calls, self.last = 0, {}
 
     def __call__(self, args):
@@ -201,6 +260,8 @@ class DeviceReader:
         self.last[device] = time.monotonic()
         if self.ctx.mode == 'sample':
             out = sample_output(lab_dir(self.ctx), device, cmd)
+        elif self.kinds:
+            out = docker_exec_output(self.devices[device], self.kinds[device], cmd, int(self.cfg.get('timeout_s', 20)))
         else:
             out = openssh_output(self.devices[device], cmd, self.cfg.get('username_env', ''), int(self.cfg.get('timeout_s', 20)))
         return f'{device}# {cmd}\n{parsed_summary(cmd, out)}{mask_secrets(out)[:MAX_OUTPUT]}'
@@ -252,6 +313,8 @@ def describe_scope(cfg, ctx):
         devices, error = sorted(resolve_scope(cfg, ctx)), None
     except ValueError as e:
         devices, error = [], str(e)
+    if cfg.get('scope_source') == 'containerlab':
+        cfg = {**cfg, 'scope_filter': {'lab': cfg.get('clab_topology', ''), **(cfg.get('scope_filter') or {})}}
     return {'source': cfg.get('scope_source', 'ssot'), 'filter': cfg.get('scope_filter') or {},
             'devices': devices, 'error': error, 'allow': cfg.get('allow', []),
             'always_denied': list(ALWAYS_DENY_WORDS),

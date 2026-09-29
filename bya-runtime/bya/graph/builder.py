@@ -29,10 +29,10 @@ SHAPES = {
     'ask': ('Answer when I ask', 'When you ask a question'),
 }
 COMMANDS = {
-    'interfaces': ('Interface status and counters', ['show interfaces *']),
+    'interfaces': ('Interface status and counters', ['show interfaces *', 'show interface *']),
     'ip_brief': ('Interface summary', ['show ip interface brief']),
     'logs': ('Recent logs', ['show logging | include *']),
-    'bgp': ('BGP neighbours', ['show ip bgp summary', 'show bgp *']),
+    'bgp': ('BGP neighbours', ['show ip bgp summary', 'show bgp *', 'show network-instance * protocols bgp *']),
     'routes': ('Routing table lookups', ['show ip route *']),
     'config_lines': ('Lines of the running config', ['show running-config | include *']),
     'reachability': ('Ping and traceroute', ['ping *', 'traceroute *']),
@@ -124,6 +124,7 @@ def build(spec):
             raise ValueError('Pick at least one kind of command the agent may run on devices.')
         allow = [p for c in commands for p in COMMANDS[c][1]]
         cfg = {'scope_source': dev.get('source', 'ssot'), 'scope_filter': dev.get('filter') or {}, 'devices': dev.get('devices') or [],
+               'clab_topology': dev.get('clab_topology', ''),
                'allow': allow, 'max_commands': 10, 'min_interval_s': 2, 'timeout_s': 20, 'username_env': dev.get('username_env', ''),
                'access': 'read'}
         attached.append(('devices', 'tool.device', cfg))

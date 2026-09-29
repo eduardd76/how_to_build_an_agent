@@ -12,6 +12,7 @@ Stop at the first failing stage and fix it before moving on.
 | 5 | Slack approval flow | Slack bot token, one **test** channel | 1 hour |
 | 6 | TimesFM forecasting (optional) | PyTorch, TimesFM 2.5 checkpoint, 3+ days of clean history | Half a day |
 | 7 | Read one real device (read-only SSH) | One lab or non-critical device, a read-only SSH account | 1 hour |
+| 8 | containerlab lab (read, record, rehearse) | Docker, containerlab (or its container), SR Linux and FRR images | 1 hour |
 
 Commands are for macOS/Linux. On Windows PowerShell, replace `export NAME=value` with `$env:NAME="value"`.
 All BYA commands run from the `bya-runtime/` directory.
@@ -29,7 +30,7 @@ python server.py
 
 Open `http://127.0.0.1:8787` and keep the terminal open.
 
-- [ ] All tests pass (107 at the time of writing).
+- [ ] All tests pass (115 at the time of writing).
 - [ ] Evals: 8/8 pass (4 incident, 4 forecast).
 - [ ] **Incident brief** template → **Run test** with *Sample data*: the trace shows SSOT, Knowledge, Monitoring, Analysis, Output checks, Delivery policy.
 - [ ] **Capacity forecast** template → **Run test**: a chart appears and the draft starts with `[SAMPLE / trend baseline]`.
@@ -215,6 +216,19 @@ python -m bya.graph reach diagrams/<your-copy>.json --live
 - [ ] Ask the agent (in the alert text or the instructions) to "clear the counters". The trace shows the command as **DROP** and the device's counters are unchanged (`show interfaces` before and after).
 - [ ] `show running-config | include snmp` returns `community ****`; the real community never appears in the trace or the draft.
 - [ ] Your device's own AAA or syslog shows only `show` commands from the BYA account.
+
+---
+
+## Stage 8 — containerlab lab
+
+Follow [`bya-runtime/containerlab/README.md`](bya-runtime/containerlab/README.md) steps 1–4.
+
+- [ ] `./rehearse.sh status` shows every BGP session established on srl1, srl2 and frr1.
+- [ ] `python3 -m bya.graph record containerlab/clab-bya/topology-data.json` saves outputs for all three nodes; `lab/srl1/` contains real SR Linux output.
+- [ ] **New agent → Devices from: My containerlab lab** → **Reach** lists srl1, srl2 and frr1.
+- [ ] Live run: the trace shows `srl1# show network-instance default protocols bgp neighbor` with real output.
+- [ ] `./rehearse.sh bgp-down`, run the agent again: its brief names the frr1 ↔ srl1 session as down. `./rehearse.sh restore` brings it back.
+- [ ] Ask the agent to "clear the BGP session": the trace shows the command as **DROP** and `./rehearse.sh status` is unchanged.
 
 ---
 

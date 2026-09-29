@@ -1,1 +1,3 @@
 __pycache__/
+bya-runtime/containerlab/clab-*/
+bya-runtime/containerlab/*.bak

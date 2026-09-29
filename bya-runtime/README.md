@@ -140,6 +140,8 @@ python agent.py                                                      # needs BYA
 - Sample mode never contacts a device: it replays `lab/<device>/<command>.txt`. Live mode runs `ssh -T -o BatchMode=yes -- <device> <command>` with the jump host's own OpenSSH keys, config and `known_hosts`; host keys stay checked and no shell is involved on this side.
 - The filter is built for network OS command lines (IOS, IOS-XE, NX-OS, EOS, Junos, VRP). On Linux-based devices the SSH command runs in a remote shell, so also give BYA an account that is read-only on the device (a restricted shell or an SSH forced command). Use a read-only device account everywhere: it is the second layer if the filter ever misses something.
 
+**containerlab:** a device block can take its devices from a deployed containerlab lab (`scope_source: containerlab`, `clab_topology: containerlab/clab-bya/topology-data.json`). Live mode then runs each allowed command with `docker exec` and the node's own CLI (`sr_cli` for SR Linux, `vtysh -c` for FRR, `Cli -c` for cEOS), still through the same filter. `python -m bya.graph record <topology-data.json>` saves real lab output to `lab/` for sample mode and evals. A ready-made three-router lab and an incident-rehearsal script are in [`containerlab/`](containerlab/README.md).
+
 **Reach** in the top bar, or `python -m bya.graph reach <diagram>`, lists everything a diagram's agents could touch before it runs: devices and allowed commands, read tools, change paths (each approved), memory, outputs, and whether prompts go to a remote model.
 
 Current limit: MCP servers must be local (stdio); remote MCP isn't supported yet.

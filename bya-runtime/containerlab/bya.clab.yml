@@ -1,0 +1,32 @@
+# BYA lab: three routers in a triangle, eBGP everywhere.
+#   srl1 (AS 65001) ── srl2 (AS 65002)
+#      \               /
+#       └── frr1 (AS 65003) ┘
+# Deploy:   sudo containerlab deploy -t bya.clab.yml
+# Destroy:  sudo containerlab destroy -t bya.clab.yml
+name: bya
+
+topology:
+  kinds:
+    nokia_srlinux:
+      image: ghcr.io/nokia/srlinux:latest
+    linux:
+      image: quay.io/frrouting/frr:10.1.0
+
+  nodes:
+    srl1:
+      kind: nokia_srlinux
+      startup-config: configs/srl1.cfg
+    srl2:
+      kind: nokia_srlinux
+      startup-config: configs/srl2.cfg
+    frr1:
+      kind: linux
+      binds:
+        - configs/frr1.conf:/etc/frr/frr.conf
+        - configs/frr-daemons:/etc/frr/daemons
+
+  links:
+    - endpoints: ["srl1:e1-1", "srl2:e1-1"]
+    - endpoints: ["srl1:e1-2", "frr1:eth1"]
+    - endpoints: ["srl2:e1-2", "frr1:eth2"]

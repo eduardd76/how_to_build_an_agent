@@ -1,0 +1,20 @@
+{
+  "nokia_srlinux": [
+    "show interface ethernet-1/1",
+    "show interface ethernet-1/2",
+    "show interface ethernet-1/1 detail",
+    "show network-instance default protocols bgp neighbor",
+    "show network-instance default route-table"
+  ],
+  "linux": [
+    "show bgp summary",
+    "show interface eth1",
+    "show interface eth2",
+    "show ip route"
+  ],
+  "arista_ceos": [
+    "show interfaces",
+    "show ip bgp summary",
+    "show logging last 50"
+  ]
+}
