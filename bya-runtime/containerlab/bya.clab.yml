@@ -2,7 +2,7 @@
 #   srl1 (AS 65001) ── srl2 (AS 65002)
 #      \               /
 #       └── frr1 (AS 65003) ┘
-# Deploy:   sudo containerlab deploy -t bya.clab.yml
+# Deploy:   sudo containerlab deploy -t bya.clab.yml   (on macOS: inside an OrbStack Linux machine, see README.md)
 # Destroy:  sudo containerlab destroy -t bya.clab.yml
 name: bya
 

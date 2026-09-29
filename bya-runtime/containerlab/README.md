@@ -10,24 +10,26 @@ srl1 (AS 65001) ──e1-1──── e1-1── srl2 (AS 65002)
       └── eth1 ── frr1 (AS 65003) ── eth2 ┘
 ```
 
-## 1. Deploy (macOS with Docker Desktop, or Linux)
+## 1. Deploy
 
-containerlab is a Linux program. On macOS, run it from its own container against Docker Desktop's engine.
-Run these from `bya-runtime/containerlab/`:
+**macOS (Apple Silicon): use an OrbStack Linux machine.** SR Linux does not run inside Docker Desktop's VM: its
+network manager crashes setting up the management namespace (`net_inst_mgr` fails, commit failed). A real Linux
+machine fixes that. OrbStack shares your home folder at the same path, so the repo is already there.
 
 ```sh
-docker pull ghcr.io/nokia/srlinux:latest
-docker pull quay.io/frrouting/frr:10.1.0
-
-alias clab='docker run --rm -it --privileged --network host --pid host \
-  -v /var/run/docker.sock:/var/run/docker.sock -v /var/run/netns:/var/run/netns \
-  -v /var/lib/docker/containers:/var/lib/docker/containers \
-  -v "$(pwd)":"$(pwd)" -w "$(pwd)" ghcr.io/srl-labs/clab containerlab'
-
-clab deploy -t bya.clab.yml
+brew install orbstack          # then open OrbStack once
+orb create ubuntu clab
+orb -m clab bash -c "curl -sL https://containerlab.dev/setup | sudo -E bash -s 'all'"
+orb -m clab bash -c 'sudo usermod -aG docker $USER'
+orb -m clab                    # a shell inside the Linux machine
+cd ~/how_to_build_an_agent/bya-runtime/containerlab
+sudo containerlab deploy -t bya.clab.yml
 ```
 
-On Linux with containerlab installed, use `sudo containerlab deploy -t bya.clab.yml` instead.
+Run BYA inside the same machine (`cd .. && python3 server.py`), so `docker exec` reaches the lab. Open
+`http://127.0.0.1:8787/studio.html` on the Mac; OrbStack forwards it (or use `http://clab.orb.local:8787`).
+
+**Linux:** install containerlab and run `sudo containerlab deploy -t bya.clab.yml` from this folder.
 
 The lab uses its own management network, `bya-mgmt` (172.29.29.0/24). If deploy reports that the subnet overlaps an
 existing Docker network, change `ipv4-subnet` in `bya.clab.yml` to a free /24.
