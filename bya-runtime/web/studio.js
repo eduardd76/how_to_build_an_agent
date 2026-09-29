@@ -600,6 +600,227 @@ async function exportPython() {
   } catch (e) { toast(e.message); }
 }
 
+// ---------- New agent: start from the job, not an empty canvas ----------
+const EXAMPLES = [
+  {label: 'BGP neighbour went down', shape: 'alert', job: 'When a BGP neighbour goes down, find out which peer and circuit are affected and brief the on-call engineer.', commands: ['bgp', 'logs', 'interfaces']},
+  {label: 'Interface errors rising', shape: 'alert', job: 'When interface errors rise on a WAN link, find out what the counters and logs show and brief the on-call engineer.', commands: ['interfaces', 'logs']},
+  {label: 'Weekly WAN capacity note', shape: 'report', job: 'Write the weekly capacity note for the WAN links: which ones may cross 80 % soon and how reliable the forecast is.', commands: []},
+  {label: 'Config against our standard', shape: 'review', job: 'Review a router config against our configuration standard and list what to fix before the change window.', commands: []},
+];
+const TEST_LABELS = {'does-the-job': 'Does the job with its tools', 'alert-tries-to-trick-it': 'An alert that tries to trick it changes nothing',
+  'input-tries-to-trick-it': 'A request that tries to trick it changes nothing', 'cites-a-runbook': 'Cites a runbook it actually found'};
+let wiz = null, wizOpts = null, wizTimer = null;
+
+function wizDefaults() {
+  return {step: 1, preview: null, spec: {
+    shape: 'alert', job: '', name: '', trigger: {source: 'sample', sensor_id: wizOpts?.sensors?.[0]?.id || '1001'},
+    devicesOn: true, devices: {source: 'ssot', filter: {site: wizOpts?.sensors?.[0]?.site || wizOpts?.asset_sites?.[0] || ''}, devices: [], commands: ['interfaces', 'logs']},
+    asset_register: true, runbooks: true, forecast: false, configs: false, memory: true, mcpOn: false,
+    mcp: [{name: '', command: [], allow_tools: []}], output: {kind: 'file', channel_env: 'SLACK_CHANNEL', url: ''},
+    approver: 'the on-call engineer', model: {model: '', model_url: ''}}};
+}
+function wizSpec() {  // the spec the server builds from (only what is switched on)
+  const s = wiz.spec;
+  return {shape: s.shape, job: s.job, name: s.name, trigger: s.trigger, approver: s.approver, memory: s.memory,
+    asset_register: s.asset_register, runbooks: s.runbooks, forecast: s.forecast, configs: s.configs,
+    devices: s.devicesOn ? s.devices : null, mcp: s.mcpOn ? s.mcp.filter(m => m.command.length) : [],
+    output: s.output, model: {model: s.model.model.trim(), model_url: s.model.model_url.trim()}};
+}
+async function openBuilder() {
+  if (!wizOpts) {
+    try { wizOpts = await (await fetch('/api/builder/options')).json(); } catch { toast('The local runtime is not reachable.'); return; }
+  }
+  wiz = wizDefaults();
+  $('#builder').hidden = false;
+  renderBuilder();
+  $('#wiz-job')?.focus();
+}
+function closeBuilder() { $('#builder').hidden = true; }
+function wizSteps() {
+  const names = ['The job', 'What it may look at', 'Review and test'];
+  return `<nav class="wiz-steps" aria-label="Steps">${names.map((n, i) => `<span class="${i + 1 === wiz.step ? 'now' : i + 1 < wiz.step ? 'done' : ''}" ${i + 1 === wiz.step ? 'aria-current="step"' : ''}>${i + 1 < wiz.step ? '✓' : i + 1} ${n}</span>`).join('')}</nav>`;
+}
+function renderBuilder() {
+  const box = $('#builder'), s = wiz.spec;
+  const head = `<header class="wiz-bar"><strong>New agent</strong>${s.name || s.job ? `<span>· ${esc(s.name || s.job.slice(0, 50))}</span>` : ''}
+    <button class="btn" id="wiz-empty">Empty canvas instead</button><button class="btn" id="wiz-close" aria-label="Close">×</button></header>`;
+  box.innerHTML = head + wizSteps() + (wiz.step === 1 ? wizStep1() : wizStep2());
+  $('#wiz-close').onclick = closeBuilder;
+  $('#wiz-empty').onclick = () => { if (!diagram.blocks.length || confirm('Start a new, empty diagram?')) { setDiagram(blank()); closeBuilder(); } };
+  box.querySelectorAll('[data-bind]').forEach(el => el.addEventListener(el.type === 'checkbox' || el.tagName === 'SELECT' || el.type === 'radio' ? 'change' : 'input', () => wizBind(el)));
+  if (wiz.step === 1) {
+    box.querySelectorAll('[data-example]').forEach(b => b.onclick = () => {
+      const ex = EXAMPLES[Number(b.dataset.example)];
+      Object.assign(s, {shape: ex.shape, job: ex.job, forecast: ex.shape === 'report', configs: ex.shape === 'review', devicesOn: ex.commands.length > 0});
+      if (ex.commands.length) s.devices.commands = ex.commands;
+      renderBuilder();
+    });
+    $('#wiz-next').onclick = () => {
+      if (s.job.trim().length < 10) { toast('Describe the job in one sentence first.'); $('#wiz-job').focus(); return; }
+      wiz.step = 2; renderBuilder(); wizPreview();
+    };
+  } else {
+    $('#wiz-back').onclick = () => { wiz.step = 1; renderBuilder(); };
+    $('#wiz-build').onclick = wizBuild;
+    wizRenderPreview();
+  }
+}
+function wizBind(el) {
+  const s = wiz.spec, path = el.dataset.bind.split('.');
+  let v = el.type === 'checkbox' ? el.checked : el.value;
+  if (el.dataset.list !== undefined) v = String(v).split(/[\n,]/).map(x => x.trim()).filter(Boolean);
+  if (el.dataset.cmd) {  // command chips
+    const set = new Set(s.devices.commands);
+    el.checked ? set.add(el.dataset.cmd) : set.delete(el.dataset.cmd);
+    s.devices.commands = [...set];
+  } else {
+    let o = s;
+    path.slice(0, -1).forEach(k => { o = o[k]; });
+    o[path.at(-1)] = v;
+  }
+  if (['shape', 'devicesOn', 'mcpOn', 'devices.source', 'output.kind', 'asset_register', 'runbooks', 'forecast', 'configs', 'devices.commands'].includes(el.dataset.bind)) {
+    const focusSel = el.dataset.cmd ? `[data-cmd="${el.dataset.cmd}"]` : `[data-bind="${el.dataset.bind}"]${el.type === 'radio' ? `[value="${el.value}"]` : ''}`;
+    if (el.dataset.bind === 'devices.source') s.devices.filter = s.devices.source === 'netbox' ? {site: wizOpts.netbox.sites[0]?.slug || '', role: wizOpts.netbox.roles[0]?.slug || ''} : {site: wizOpts.asset_sites[0] || ''};
+    if (el.dataset.bind === 'shape') { s.forecast = s.shape === 'report'; s.configs = s.shape === 'review'; }
+    renderBuilder();
+    $(focusSel)?.focus();
+  }
+  if (el.dataset.bind === 'trigger.sensor_id' && s.devices.source === 'ssot') {  // read the alerting device's site by default
+    const site = wizOpts.sensors.find(o => o.id === s.trigger.sensor_id)?.site;
+    if (site) s.devices.filter = {site};
+  }
+  if (wiz.step === 2) wizPreview();
+}
+function wizStep1() {
+  const s = wiz.spec;
+  const shapes = [['alert', 'Investigate an alert', 'Starts when monitoring alerts. Gathers evidence and briefs the on-call engineer.'],
+    ['report', 'Write a regular report', 'Runs when you start it or on a schedule, for example the weekly capacity note.'],
+    ['review', 'Review before a change', 'Checks a config or a plan against your standard and lists what to fix.'],
+    ['ask', 'Answer when I ask', 'You type a question; it investigates and answers with its evidence.']];
+  return `<div class="wiz-body"><main class="wiz-main">
+    <h1>What should this agent do?</h1><p class="wiz-lede">One agent, one job. Pick the kind of job, then say it in your own words.</p>
+    <fieldset class="wiz-shapes"><legend>Kind of job</legend>${shapes.map(([id, t, d]) => `<label class="wiz-card ${s.shape === id ? 'on' : ''}">
+      <input type="radio" name="wiz-shape" value="${id}" data-bind="shape" ${s.shape === id ? 'checked' : ''}><span><strong>${t}</strong><small>${d}</small></span></label>`).join('')}</fieldset>
+    <label class="wiz-field" for="wiz-job">The job in one sentence</label>
+    <textarea id="wiz-job" rows="2" data-bind="job" placeholder="When PRTG alerts on a WAN interface, find out what's happening and tell the on-call engineer.">${esc(s.job)}</textarea>
+    <div class="wiz-examples"><span>Or start from an example:</span>${EXAMPLES.map((e, i) => `<button class="chip" data-example="${i}">${esc(e.label)}</button>`).join('')}</div>
+    <div class="wiz-grid">
+      <label class="wiz-field">Name <input data-bind="name" value="${esc(s.name)}" placeholder="WAN interface alert"></label>
+      ${s.shape === 'alert' ? `<label class="wiz-field">Starts when
+        <select data-bind="trigger.source"><option value="sample" ${s.trigger.source === 'sample' ? 'selected' : ''}>A sample alert (for trying it out)</option><option value="prtg" ${s.trigger.source === 'prtg' ? 'selected' : ''}>PRTG raises an alert</option></select></label>
+      <label class="wiz-field">On sensor <select data-bind="trigger.sensor_id">${(wizOpts.sensors || []).map(o => `<option value="${esc(o.id)}" ${o.id === s.trigger.sensor_id ? 'selected' : ''}>${esc(o.id)} · ${esc(o.label)}</option>`).join('')}</select></label>`
+      : `<p class="wiz-note">${s.shape === 'ask' ? 'You start it by typing a question.' : 'You start it by hand; schedule it with <code>python -m bya.graph run</code> from cron or a task scheduler.'}</p>`}
+    </div>
+    <div class="wiz-actions"><span></span><button class="btn primary big" id="wiz-next">Next: what it may look at</button></div>
+  </main>
+  <aside class="wiz-side"><strong>What a good job looks like</strong>
+    <div><em class="bad">Too small, that's a tool</em><span>"Check interface status"</span></div>
+    <div class="good"><em>One job</em><span>"When an interface alert fires, find out what's happening and brief on-call"</span></div>
+    <div><em class="bad">Too big, split it</em><span>"Handle all network incidents"</span></div>
+    <p>A job is something you would write a runbook for. Narrow jobs are easier to test and need less access.</p></aside></div>`;
+}
+function wizStep2() {
+  const s = wiz.spec, d = s.devices, nb = wizOpts.netbox;
+  const opt = (v, cur, label) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(label ?? v)}</option>`;
+  const scope = d.source === 'netbox'
+    ? `<label class="wiz-field">Site <select data-bind="devices.filter.site">${nb.sites.map(x => opt(x.slug, d.filter.site, x.name)).join('')}</select></label>
+       <label class="wiz-field">Role <select data-bind="devices.filter.role">${nb.roles.map(x => opt(x.slug, d.filter.role, x.name)).join('')}</select></label>`
+    : d.source === 'list'
+      ? `<label class="wiz-field span2">Device names, one per line <textarea rows="2" data-bind="devices.devices" data-list>${esc(d.devices.join('\n'))}</textarea></label>`
+      : `<label class="wiz-field">Site (asset register) <select data-bind="devices.filter.site">${wizOpts.asset_sites.map(x => opt(x, d.filter.site)).join('')}</select></label><span></span>`;
+  const card = (bind, on, title, sub, extra = '') => `<div class="wiz-card wide ${on ? 'on' : ''}"><label class="wiz-check"><input type="checkbox" data-bind="${bind}" ${on ? 'checked' : ''}><span><strong>${title}</strong><small>${sub}</small></span></label>${on ? extra : ''}</div>`;
+  const devices = card('devicesOn', s.devicesOn, 'Devices', 'read-only commands over SSH', `
+    <div class="wiz-grid three"><label class="wiz-field">Devices from <select data-bind="devices.source">${opt('ssot', d.source, 'Asset register')}${nb.configured ? opt('netbox', d.source, 'NetBox') : ''}${opt('list', d.source, 'A list I type')}</select></label>${scope}</div>
+    ${nb.error ? `<p class="warn">NetBox: ${esc(nb.error)}</p>` : ''}
+    <div class="wiz-field">It may run</div><div class="wiz-chips">${wizOpts.commands.map(c => `<label class="chip ${d.commands.includes(c.id) ? 'on' : ''}"><input type="checkbox" data-bind="devices.commands" data-cmd="${c.id}" ${d.commands.includes(c.id) ? 'checked' : ''}>${esc(c.label)}</label>`).join('')}</div>
+    <p class="wiz-note mono">${esc(wizOpts.commands.filter(c => d.commands.includes(c.id)).flatMap(c => c.patterns).join(' · ') || 'No commands chosen')}</p>`);
+  const mcp = s.mcp[0];
+  return `<div class="wiz-body"><main class="wiz-main">
+    <h1>What may it look at?</h1><p class="wiz-lede">Tick only what the job needs. Everything here is read-only; nothing can change a device.</p>
+    ${devices}
+    <div class="wiz-grid three">
+      ${card('asset_register', s.asset_register, 'Asset register', 'owner, service, site')}
+      ${card('runbooks', s.runbooks, 'Runbooks', 'your runbooks and documents in knowledge/')}
+      ${s.shape === 'review' ? card('configs', s.configs, 'Config files', `${wizOpts.configs.length} in configs/`) : card('forecast', s.forecast, 'Metric forecast', 'when a metric may cross a threshold')}
+    </div>
+    ${card('mcpOn', s.mcpOn, 'One of your own tools', 'a local MCP server, read-only', `<div class="wiz-grid three">
+      <label class="wiz-field">Name <input data-bind="mcp.0.name" value="${esc(mcp.name)}" placeholder="servicenow"></label>
+      <label class="wiz-field">Command <input data-bind="mcp.0.command" data-list value="${esc(mcp.command.join(', '))}" placeholder="python, snow_mcp.py"></label>
+      <label class="wiz-field">Only these tools <input data-bind="mcp.0.allow_tools" data-list value="${esc(mcp.allow_tools.join(', '))}" placeholder="get_incident, search_incidents"></label></div>`)}
+    <div class="wiz-card wide"><div class="wiz-grid three">
+      <label class="wiz-field">Send the result to <select data-bind="output.kind">${opt('file', s.output.kind, 'A file in outputs/')}${opt('slack', s.output.kind, 'Slack')}${opt('webhook', s.output.kind, 'A webhook (HTTPS)')}</select></label>
+      ${s.output.kind === 'slack' ? `<label class="wiz-field">Channel variable <input data-bind="output.channel_env" value="${esc(s.output.channel_env)}"></label>`
+        : s.output.kind === 'webhook' ? `<label class="wiz-field">URL <input data-bind="output.url" value="${esc(s.output.url)}" placeholder="https://"></label>` : '<span></span>'}
+      <label class="wiz-field">Approved first by <input data-bind="approver" value="${esc(s.approver)}"></label>
+      <label class="wiz-check"><input type="checkbox" data-bind="memory" ${s.memory ? 'checked' : ''}>Remember its last 5 runs</label>
+      <label class="wiz-field">Model <input data-bind="model.model" value="${esc(s.model.model)}" placeholder="LLM_MODEL (e.g. qwen2.5:7b)"></label>
+      <label class="wiz-field">Model endpoint <input data-bind="model.model_url" value="${esc(s.model.model_url)}" placeholder="LLM_BASE_URL or Ollama on this machine"></label>
+    </div></div>
+    <div class="wiz-actions"><button class="btn" id="wiz-back">Back</button><button class="btn primary big" id="wiz-build">Build the agent</button></div>
+  </main><aside class="wiz-side" id="wiz-preview" aria-live="polite"></aside></div>`;
+}
+function wizPreview() {
+  clearTimeout(wizTimer);
+  wizTimer = setTimeout(async () => {
+    try { wiz.preview = await api('/api/builder/preview', {spec: wizSpec()}); } catch (e) { wiz.preview = {problem: e.message}; }
+    wizRenderPreview();
+  }, 250);
+}
+function wizRenderPreview() {
+  const box = $('#wiz-preview'), p = wiz?.preview;
+  if (!box) return;
+  if (!p) { box.innerHTML = '<strong>What it will be able to touch</strong><p class="muted">Working it out…</p>'; return; }
+  if (p.problem) { box.innerHTML = `<strong>What it will be able to touch</strong><p class="warn">${esc(p.problem.replace('The answers do not make a valid agent yet: ', ''))}</p>`; return; }
+  const s = p.summary, row = (label, n, cls = '') => `<div class="wiz-row"><span>${label}</span><strong class="${cls}">${n}</strong></div>`;
+  box.innerHTML = `<strong>What it will be able to touch</strong>
+    ${row('Devices, read-only', s.devices_readable, 'read')}${row('Read tools', s.read_tools, 'read')}${row('Things it can change', s.change_paths, s.change_paths ? 'change' : '')}
+    ${p.devices.length ? `<p class="wiz-note">${esc(p.devices.slice(0, 8).join(', '))}${p.devices.length > 8 ? ` and ${p.devices.length - 8} more` : ''}</p>` : ''}
+    ${p.scope_errors.map(e => `<p class="warn">${esc(e)}</p>`).join('')}
+    ${s.remote_models.length ? `<p class="warn">Prompts go to a remote model: ${esc(s.remote_models.join(', '))}.</p>` : ''}
+    <div class="wiz-safe">${s.change_paths ? 'Each change needs approval.' : '<strong>This agent can\'t change anything.</strong>'} Its result is sent only after ${esc(wiz.spec.approver || 'a person')} approves it.</div>
+    <p class="wiz-note">Updates as you tick. Credentials come from this machine's settings, never from the agent.</p>`;
+}
+async function wizBuild() {
+  const btn = $('#wiz-build');
+  btn.disabled = true;
+  let p;
+  try { p = await api('/api/builder/preview', {spec: wizSpec()}); } catch (e) { p = {problem: e.message}; }
+  btn.disabled = false;
+  if (p.problem) { wiz.preview = p; wizRenderPreview(); toast('Fix the highlighted answer first.'); return; }
+  setDiagram(p.diagram);
+  closeBuilder();
+  openReview(p);
+}
+function openReview(p) {
+  const doc = p.diagram, agent = doc.blocks.find(b => b.type === 'agent').config;
+  const out = doc.blocks.find(b => b.id === 'send');
+  const box = $('#review-panel');
+  box.hidden = false;
+  box.innerHTML = `<div class="run-head"><h2>Here is your agent</h2><span class="pill ok">Passes all safety rules</span><button class="btn small" id="close-review" aria-label="Close">×</button></div>
+    <p class="desc">Built from your answers. Change anything on the canvas; click a block to see its settings.</p>
+    <h3>What BYA set up for you</h3>
+    <ul class="checks">
+      <li>Instructions drafted from your sentence (click the agent block to edit)</li>
+      <li>Limits: ${agent.max_steps} steps, ${Math.round(agent.token_budget / 1000)}k tokens, ${Math.round(agent.timeout_s / 60)} minutes</li>
+      <li>Evidence check: cites only what its tools returned; blocks "I restarted…" and root-cause guesses</li>
+      <li>${esc(wiz.spec.approver || 'A person')} approves every result before it goes to ${esc(out.type === 'output.file' ? out.config.path : out.type === 'output.slack' ? 'Slack' : 'the webhook')}</li>
+      ${p.summary.devices_readable ? `<li>${p.summary.devices_readable} devices, read-only; secrets masked in their output</li>` : ''}
+    </ul>
+    <h3>${doc.evals.length} tests, ready to run</h3>
+    <ul class="tests">${doc.evals.map(c => `<li>${esc(TEST_LABELS[c.id] || c.id)}</li>`).join('')}</ul>
+    <div class="draft-actions"><button class="btn primary" id="review-test">Test on sample data</button><button class="btn" id="review-run">Run once</button></div>
+    <p class="muted">Sample data never contacts a device or sends a message. Go live when the tests pass.</p>`;
+  $('#close-review').onclick = () => { box.hidden = true; };
+  $('#review-run').onclick = () => { box.hidden = true; runDiagram(); };
+  $('#review-test').onclick = () => {
+    box.hidden = true;
+    const panel = $('#evals-panel');
+    panel.hidden = false;
+    renderEvals();
+    $('#ev-run').click();
+  };
+}
+
 // ---------- files ----------
 function download(name, text) {
   const url = URL.createObjectURL(new Blob([text], {type: 'application/json'}));
@@ -634,7 +855,7 @@ async function init() {
     try { setDiagram(await api('/api/diagrams/' + e.target.value)); toast('Template loaded.'); } catch (err) { toast(err.message); }
     e.target.value = '';
   };
-  $('#new').onclick = () => { if (!diagram.blocks.length || confirm('Start a new, empty diagram?')) { setDiagram(blank()); } };
+  $('#new').onclick = openBuilder;
   $('#export').onclick = () => { save(); download(slug(diagram.name) + '.json', JSON.stringify(diagram, null, 2)); };
   $('#save').onclick = async () => {
     save();

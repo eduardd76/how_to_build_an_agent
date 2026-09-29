@@ -29,13 +29,14 @@ python server.py
 
 Open `http://127.0.0.1:8787` and keep the terminal open.
 
-- [ ] All tests pass (100 at the time of writing).
+- [ ] All tests pass (107 at the time of writing).
 - [ ] Evals: 8/8 pass (4 incident, 4 forecast).
 - [ ] **Incident brief** template → **Run test** with *Sample data*: the trace shows SSOT, Knowledge, Monitoring, Analysis, Output checks, Delivery policy.
 - [ ] **Capacity forecast** template → **Run test**: a chart appears and the draft starts with `[SAMPLE / trend baseline]`.
 - [ ] **Approve & send** is blocked with "Sample drafts cannot send messages."
 - [ ] **Source of truth** view lists the 3 sample assets.
 - [ ] Open `http://127.0.0.1:8787/studio.html`. Choose **Start from… → Incident brief**; the status shows **Ready to run**.
+- [ ] Click **New agent** → pick **Interface errors rising** → **Next**. The right-hand panel shows the devices in scope and "This agent can't change anything". Set **Model** to your model → **Build the agent**. The canvas shows a valid diagram and the review panel lists 3 tests; **Test on sample data** runs them.
 - [ ] Drag from the agent's right-hand port to the **Save to file** block. The canvas refuses, and explains that an output needs a check and an approval first.
 - [ ] Set the agent's model endpoint to your model, open **Evals**, tick **Also test the Python export** and click **Run evals**. Each case shows pass or fail per check, and the export line says whether it matches the diagram.
 - [ ] **Export Python** downloads `incident-brief.py`. From `bya-runtime/`, `PYTHONPATH=. BYA_RUNTIME=. python ~/Downloads/incident-brief.py` runs it with approvals in the terminal.
