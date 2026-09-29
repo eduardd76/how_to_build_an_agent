@@ -45,7 +45,7 @@ class PrtgMonitoring:
             if time.monotonic() - PrtgMonitoring._last_history < self.HISTORY_MIN_GAP:
                 raise ValueError('PRTG historic requests are limited to one every 12 seconds. Try again shortly.')
             PrtgMonitoring._last_history = time.monotonic()
-        return core.http(base + '/api/' + path + '?' + urllib.parse.urlencode({**params, 'apitoken': token}))
+        return core.http(base + '/api/' + path + '?' + urllib.parse.urlencode({**params, 'apitoken': token}, doseq=True))
 
     def alert(self, sensor_id):
         doc = self._get('table.json', {'content': 'sensors', 'columns': 'objid,device,sensor,status,message,lastvalue',
@@ -54,6 +54,17 @@ class PrtgMonitoring:
         if len(rows) != 1:
             raise ValueError('PRTG did not return exactly one sensor.')
         return {**rows[0], 'collected_at': stamp(), 'sensor_id': sensor_id}
+
+    ALARM_STATUS = (4, 5, 10, 14)  # Warning, Down, Unusual, Down (partial)
+
+    def alarms(self, limit=200):
+        """Sensors currently in a warning or down state, as PRTG reports them."""
+        doc = self._get('table.json', {'content': 'sensors', 'columns': 'objid,device,group,sensor,status,message,lastvalue,lastcheck',
+                                       'filter_status': [str(s) for s in self.ALARM_STATUS], 'count': limit})
+        return [{'sensor_id': str(s.get('objid')), 'device': s.get('device', ''), 'group': s.get('group', ''),
+                 'sensor': s.get('sensor', ''), 'status': s.get('status', ''), 'message': s.get('message_raw') or s.get('message', ''),
+                 'lastvalue': s.get('lastvalue', ''), 'lastcheck': s.get('lastcheck', '')}
+                for s in doc.get('sensors', []) if s.get('objid') is not None]
 
     def history(self, sensor, interval, now):
         hours = int(self.config.get('history_hours', 72))

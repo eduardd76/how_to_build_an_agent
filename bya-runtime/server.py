@@ -1,4 +1,4 @@
-"""Loopback-only BYA runtime. No credentials are accepted by the browser."""
+"""Loopback-only BYA runtime. The Settings page can store credentials in a local file, but never reads them back."""
 import argparse
 import datetime as dt
 import json
@@ -10,18 +10,21 @@ import urllib.parse
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from bya import adapters, core, graph, pipeline, prompts, validation
+from bya import adapters, checks, core, graph, pipeline, prompts, settings, validation
 from bya.core import UTC, date
 from bya.graph import builder, evals
 from bya.graph.catalog import catalog
 from bya.graph.export import export_python
 from bya.graph.reach import reach
 from bya.store import DiagramRunStore, RunStore
+from bya.watch import FixedAlert, PrtgWatcher
 
 ROOT = Path(__file__).resolve().parent
 TOKEN = secrets.token_urlsafe(32)
 LOCK = threading.Lock()
 APPROVAL_TTL = 3600
+settings.apply(ROOT)   # saved settings fill in whatever the environment did not set
+WATCHER = None
 
 
 def read(name):
@@ -80,6 +83,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json(read('ssot.json'))
         if path == '/api/catalog':
             return self.send_json({'types': catalog()})
+        if path == '/api/settings':
+            return self.send_json(settings_view())
         if path == '/api/builder/options':
             return self.send_json(builder_options())
         if path == '/api/diagram/pending':
@@ -282,7 +287,14 @@ def builder_options():
            'configs': sorted(p.name for p in (ROOT / 'configs').glob('*.cfg')),
            'labs': sorted(str(p.relative_to(ROOT)) for p in (ROOT / 'containerlab').glob('clab-*/topology-data.json')),
            'default_model': os.environ.get('LLM_MODEL', ''), 'default_model_url': os.environ.get('LLM_BASE_URL', ''),
+           'prtg': {'configured': bool(config().get('prtg_url') and os.environ.get('PRTG_API_TOKEN')), 'alarms': []},
            'netbox': {'configured': bool(os.environ.get('NETBOX_URL') and os.environ.get('NETBOX_TOKEN')), 'sites': [], 'roles': []}}
+    if out['prtg']['configured']:
+        try:
+            out['prtg']['alarms'] = [{'id': a['sensor_id'], 'label': f"{a['device']} · {a['sensor']} ({a['status']})"}
+                                     for a in adapters.PrtgMonitoring(config()).alarms(limit=50)]
+        except ValueError as e:
+            out['prtg']['error'] = str(e)
     if out['netbox']['configured']:
         base, auth = os.environ['NETBOX_URL'].rstrip('/'), {'Authorization': f"Token {os.environ['NETBOX_TOKEN']}"}
         try:
@@ -306,6 +318,104 @@ def builder_preview(data):
     return {'diagram': doc, 'summary': r['summary'], 'devices': devices, 'scope_errors': scope_errors}
 
 
+def settings_view():
+    cfg = config()
+    watched = set(cfg.get('prtg_watch', []))
+    candidates = []
+    for f in sorted((ROOT / 'diagrams').glob('*.json')):
+        try:
+            doc = json.loads(f.read_text())
+        except ValueError:
+            continue
+        trig = next((b for b in doc.get('blocks', []) if b.get('type') == 'trigger.alert'), None)
+        if trig and (trig.get('config') or {}).get('source') == 'prtg':
+            candidates.append({'file': f.name, 'name': doc.get('name', f.stem), 'sensor_id': str(trig['config'].get('sensor_id', '')),
+                               'watched': f.name in watched})
+    return {'fields': settings.describe(ROOT), 'watch': {
+        'agents': candidates, 'running': bool(WATCHER and WATCHER._thread and WATCHER._thread.is_alive()),
+        'events': list(WATCHER.events) if WATCHER else [], 'poll_s': int(cfg.get('prtg_poll_s') or 60)}}
+
+
+def settings_save(data):
+    values, clear = data.get('values') or {}, data.get('clear') or []
+    if not isinstance(values, dict) or not isinstance(clear, list):
+        raise ValueError('Send "values" as an object and "clear" as a list.')
+    settings.save(ROOT, values, [str(c) for c in clear])
+    restart_watcher()
+    return settings_view()
+
+
+def settings_test(data):
+    target = data.get('target')
+    if target == 'lab':
+        ok, detail = checks.lab(ROOT)
+    elif target in checks.CHECKS:
+        ok, detail = checks.CHECKS[target](config())
+    else:
+        raise ValueError('Test "model", "prtg", "netbox" or "lab".')
+    return {'ok': ok, 'detail': detail}
+
+
+def watch_save(data):
+    files = data.get('diagrams')
+    if not isinstance(files, list) or not all(isinstance(f, str) and DIAGRAM_FILE.match(f) for f in files):
+        raise ValueError('Send "diagrams" as a list of saved diagram file names.')
+    cfg = config()
+    cfg['prtg_watch'] = sorted(set(files))
+    tmp = ROOT / 'config.pending.json'
+    tmp.write_text(json.dumps(cfg, indent=2))
+    os.replace(tmp, ROOT / 'config.local.json')
+    restart_watcher()
+    return settings_view()
+
+
+def watch_start_run(file, doc, alarm):
+    """A PRTG alarm starts a saved agent in live mode. It stops at its human approval, like any run."""
+    diagram = graph.load(doc)
+    ctx = _diagram_context('live')
+    ctx.monitoring = FixedAlert(alarm, ctx.monitoring)
+    if not LOCK.acquire(timeout=300):
+        raise ValueError('another run was still active after 5 minutes')
+    try:
+        try:
+            state = graph.run(diagram, ctx, None)
+        except graph.DiagramInvalid as e:
+            raise ValueError('the agent does not pass live checks: ' + '; '.join(v.message for v in e.violations)) from None
+        except graph.StepFailed as e:
+            state = {**e.state, 'error': str(e)}
+    finally:
+        LOCK.release()
+    state['started_by'] = f'PRTG alarm on sensor {alarm["sensor_id"]} ({alarm["status"]})'
+    rid = secrets.token_hex(12)
+    diagram_store().save(rid, doc, state)
+    return rid
+
+
+def _watched():
+    out = []
+    for f in config().get('prtg_watch', []):
+        path = ROOT / 'diagrams' / f
+        if DIAGRAM_FILE.match(f) and path.exists():
+            out.append((f, json.loads(path.read_text())))
+    return out
+
+
+def restart_watcher():
+    """Run the PRTG watcher while PRTG is configured and at least one agent watches it."""
+    global WATCHER
+    cfg = config()
+    if WATCHER:
+        WATCHER.stop()
+    if not (cfg.get('prtg_url') and os.environ.get('PRTG_API_TOKEN') and cfg.get('prtg_watch')):
+        return
+    events = WATCHER.events if WATCHER else []
+    WATCHER = PrtgWatcher(lambda: adapters.PrtgMonitoring(config()).alarms(), _watched, watch_start_run,
+                          poll_s=int(cfg.get('prtg_poll_s') or 60))
+    WATCHER.events = events
+    WATCHER.log(f'Watching PRTG every {WATCHER.poll_s} s for {len(cfg["prtg_watch"])} agent(s).')
+    WATCHER.start()
+
+
 def diagram_save(data):
     name = str(data.get('file', ''))
     if not DIAGRAM_FILE.match(name):
@@ -322,12 +432,19 @@ ROUTES = {'/api/assist': assist, '/api/ssot': save_ssot, '/api/run': run_agent, 
           '/api/diagram/validate': diagram_validate, '/api/diagram/run': diagram_run,
           '/api/diagram/approve': diagram_approve, '/api/diagram/save': diagram_save,
           '/api/diagram/eval': diagram_eval, '/api/diagram/export': diagram_export,
-          '/api/diagram/reach': diagram_reach, '/api/builder/preview': builder_preview}
+          '/api/diagram/reach': diagram_reach, '/api/builder/preview': builder_preview,
+          '/api/settings': settings_save, '/api/settings/test': settings_test, '/api/watch': watch_save}
 
 
 if __name__ == '__main__':
     p = argparse.ArgumentParser()
     p.add_argument('--port', type=int, default=8787)
     args = p.parse_args()
-    print(f'BYA is running at http://127.0.0.1:{args.port}. Keep this window open.')
-    ThreadingHTTPServer(('127.0.0.1', args.port), Handler).serve_forever()
+    serve(args.port)
+
+
+def serve(port):
+    httpd = ThreadingHTTPServer(('127.0.0.1', port), Handler)
+    restart_watcher()
+    print(f'BYA is running at http://127.0.0.1:{port}/studio.html. Keep this window open.')
+    httpd.serve_forever()

@@ -29,6 +29,8 @@ class ChatModel:
             if not key:
                 raise ValueError(f'Environment variable {self.api_key_env} is not set.')
             headers['Authorization'] = 'Bearer ' + key
+        elif os.environ.get('LLM_API_KEY'):  # the default key from Settings, for agents without their own
+            headers['Authorization'] = 'Bearer ' + os.environ['LLM_API_KEY']
         data = core.http(self.url + '/chat/completions', headers, body)
         try:
             choice = data['choices'][0]

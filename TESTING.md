@@ -30,7 +30,7 @@ python server.py
 
 Open `http://127.0.0.1:8787` and keep the terminal open.
 
-- [ ] All tests pass (115 at the time of writing).
+- [ ] All tests pass (128 at the time of writing).
 - [ ] Evals: 8/8 pass (4 incident, 4 forecast).
 - [ ] **Incident brief** template → **Run test** with *Sample data*: the trace shows SSOT, Knowledge, Monitoring, Analysis, Output checks, Delivery policy.
 - [ ] **Capacity forecast** template → **Run test**: a chart appears and the draft starts with `[SAMPLE / trend baseline]`.
@@ -116,7 +116,8 @@ curl -s "$PRTG/api/historicdata.json?id=1234&avg=300&sdate=2026-09-27-00-00-00&e
 
 **4b. Configure the runtime.**
 
-- In `config.local.json` set `prtg_url` (HTTPS origin only) and `prtg_timezone` (IANA name, e.g. `Europe/Berlin`).
+- Start with `python3 start.py`, open **Settings → PRTG**, enter the URL, the read-only API token and the server time
+  zone, **Save settings**, then **Test**. It should say "Connected" and list the sensors currently in alarm.
 - In `ssot.json`, replace one sample asset with the real one:
   - `sample: false`
   - `verified_at`: now, with a timezone, e.g. `2026-09-28T10:00:00+00:00`
@@ -133,6 +134,9 @@ python server.py
 In the UI, set the sensor ID and run **Incident brief** in **Live** mode.
 
 - [ ] The trace shows the real alert message; the draft names the real owner and service.
+- [ ] **New agent → Starts when: PRTG raises an alert**: the sensor field offers the sensors in alarm. Build, then
+      **Save and start on PRTG alarms**. When that sensor alarms, a draft appears in the **Inbox** within the poll
+      interval, and Settings → PRTG lists "started for sensor …". It does not run again until the sensor changes state.
 - [ ] **Negative checks.** Each one must block the run with a clear message, not produce a draft:
   - [ ] a sensor ID not in `ssot.json`: "no unique SSOT mapping"
   - [ ] a wrong channel caption in `ssot.json`: "does not match PRTG raw fields" (forecast template)

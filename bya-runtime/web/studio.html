@@ -10,6 +10,7 @@
 <script defer src="studio.js"></script>
 </head>
 <body>
+<div class="setup-banner" id="setup-banner" role="status" hidden>No model is set yet, so agents cannot run. <button class="btn small primary" id="setup-open">Open Settings</button></div>
 <div class="studio-shell">
   <header class="bar">
     <a class="brand" href="./" aria-label="BYA home"><span class="mark">b.</span><span>BYA<small>DIAGRAM STUDIO</small></span></a>
@@ -29,6 +30,7 @@
       <button class="btn" id="reach" title="Everything this diagram's agents could touch">Reach</button>
       <button class="btn" id="evals">Evals</button>
       <button class="btn" id="inbox">Inbox (0)</button>
+      <button class="btn" id="settings-btn">Settings</button>
       <button class="btn primary" id="run">▷ Run</button>
     </div>
   </header>
@@ -85,6 +87,7 @@
 <section class="inbox-panel reach-panel" id="reach-panel" aria-label="Reach" hidden></section>
 <section class="inbox-panel review-panel" id="review-panel" aria-label="Your new agent" hidden></section>
 <div class="builder" id="builder" role="dialog" aria-modal="true" aria-label="New agent" hidden></div>
+<div class="builder" id="settings" role="dialog" aria-modal="true" aria-label="Settings" hidden></div>
 <div id="toast" role="status" aria-live="polite" hidden></div>
 </body>
 </html>

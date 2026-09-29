@@ -33,12 +33,12 @@ Run BYA inside the same machine, so `docker exec` reaches the lab. Ollama runs o
 
 ```sh
 cd /Users/<you>/how_to_build_an_agent/bya-runtime
-BYA_ALLOW_HTTP_HOSTS=host.orb.internal LLM_MODEL=qwen2.5:7b LLM_BASE_URL=http://host.orb.internal:11434/v1 python3 server.py --port 8788
+python3 start.py --port 8788
 ```
 
-If `curl -s http://host.orb.internal:11434/v1/models` is refused from the machine, start Ollama on the Mac with
-`OLLAMA_HOST=0.0.0.0 ollama serve`. BYA allows plain HTTP only to localhost unless a host is listed in
-`BYA_ALLOW_HTTP_HOSTS`. Open `http://127.0.0.1:8788/studio.html` on the Mac; OrbStack forwards the port. (BYA only
+Then in **Settings → Model**: endpoint `http://host.orb.internal:11434/v1`, model `qwen2.5:7b`, and
+`host.orb.internal` under "Hosts allowed over plain HTTP"; **Save**, **Test**. If the test is refused, start Ollama on
+the Mac with `OLLAMA_HOST=0.0.0.0 ollama serve`. Open `http://127.0.0.1:8788/studio.html` on the Mac; OrbStack forwards the port. (BYA only
 answers on 127.0.0.1, so `clab.orb.local` addresses are refused.)
 
 **Linux:** install containerlab and run `sudo containerlab deploy -t bya.clab.yml` from this folder.

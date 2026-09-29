@@ -141,3 +141,19 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .review-panel .checks li{padding:3px 0 3px 22px;position:relative}.review-panel .checks li::before{content:'✓';position:absolute;left:2px;color:var(--green);font-weight:700}
 .review-panel .tests li{background:#f1f4f7;border-radius:6px;padding:7px 10px;margin-bottom:6px}
 @media (max-width:900px){.wiz-shapes,.wiz-grid,.wiz-grid.three{grid-template-columns:1fr}.wiz-side{width:100%;margin-top:0}}
+
+/* Settings */
+.setup-banner{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:25;background:var(--amber-bg);color:var(--amber);border:1px solid #ecd3a4;border-radius:10px;padding:10px 14px;display:flex;gap:12px;align-items:center;font-size:14px;box-shadow:0 8px 24px #19233222}
+.set-body{width:min(900px,100%);margin:0 auto;padding:20px 24px 48px;display:flex;flex-direction:column;gap:16px}
+.set-section{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px 18px;display:flex;flex-direction:column;gap:12px}
+.set-head{display:flex;align-items:baseline;gap:12px}.set-head h2{margin:0;font-size:18px;color:var(--ink)}.set-head .btn{margin-left:auto}
+.set-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 16px}
+.set-field{display:flex;flex-direction:column;gap:4px}.set-field label{font-size:13px;font-weight:600;color:var(--ink)}
+.set-field input{font-size:15px;padding:9px 11px;border:1px solid #b9c4cf;border-radius:8px;min-height:42px}.set-field input:disabled{background:#f1f4f7;color:var(--muted)}
+.set-field small{font-size:12px;color:var(--muted)}
+.badge{font-size:11px;font-weight:600;padding:1px 7px;border-radius:999px;background:#e8edf2;color:var(--muted)}.badge.ok{background:#d9f5e9;color:var(--green-dark)}
+.linkish{align-self:flex-start;background:none;border:0;padding:0;color:var(--red);font-size:12px;cursor:pointer;text-decoration:underline}
+.set-result{margin:0;font-size:13px;padding:8px 10px;border-radius:8px;background:#f1f4f7}.set-result.ok{background:#d9f5e9;color:var(--green-dark)}.set-result.bad{background:var(--red-bg);color:var(--red)}
+.set-watch{border-top:1px solid var(--line);padding-top:12px;display:flex;flex-direction:column;gap:8px}.set-watch h3{margin:0;font-size:15px}
+.set-events{margin:0;padding:0;list-style:none;font-size:12px;color:var(--muted)}.set-events span{font-family:ui-monospace,monospace;margin-right:6px}
+@media (max-width:760px){.set-grid{grid-template-columns:1fr}}

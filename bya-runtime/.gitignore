@@ -3,3 +3,7 @@ bya.sqlite3
 ssot.pending.json
 __pycache__/
 outputs/
+secrets.local.json
+secrets.local.pending
+config.local.pending
+config.pending.json

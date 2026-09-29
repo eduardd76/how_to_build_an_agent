@@ -449,7 +449,7 @@ function prettyArgs(args) {
 // ---------- reach: what the agents could touch, before anything runs ----------
 async function openReach() {
   const box = $('#reach-panel');
-  box.hidden = false;
+  showPanel(box);
   box.innerHTML = '<p class="muted">Working out reach…</p>';
   let r;
   try { r = await api('/api/diagram/reach', {diagram, mode: $('#mode').value}); }
@@ -476,6 +476,13 @@ async function openReach() {
   $('#close-reach').onclick = () => { box.hidden = true; };
 }
 
+// One side panel at a time, placed below the top bar (which wraps onto two rows on narrow screens).
+function showPanel(box) {
+  document.querySelectorAll('.inbox-panel').forEach(p => { if (p !== box) p.hidden = true; });
+  box.style.top = `${Math.round($('.bar').getBoundingClientRect().bottom + 8)}px`;
+  box.hidden = false;
+}
+
 // ---------- inbox: everything waiting for a human, across runs ----------
 async function refreshInbox() {
   if (!token) return;
@@ -489,7 +496,7 @@ async function refreshInbox() {
 async function openInbox() {
   const items = await refreshInbox();
   const box = $('#inbox-panel');
-  box.hidden = false;
+  showPanel(box);
   box.innerHTML = `<div class="run-head"><h2>Inbox</h2><span class="pill ${items.length ? 'wait' : 'ok'}">${items.length} waiting</span>
     <button class="btn small" id="close-inbox" aria-label="Close inbox">×</button></div>` + (items.length ? items.map((it, i) => `
     <div class="draft"><strong>${esc(it.diagram)} · ${it.kind === 'tool' ? `tool call "${esc(it.tool)}" by ${esc(it.block)}` : `draft at ${esc(it.block)}`}</strong>
@@ -678,7 +685,7 @@ function wizBind(el) {
     path.slice(0, -1).forEach(k => { o = o[k]; });
     o[path.at(-1)] = v;
   }
-  if (['shape', 'devicesOn', 'mcpOn', 'devices.source', 'devices.clab_topology', 'output.kind', 'asset_register', 'runbooks', 'forecast', 'configs', 'devices.commands'].includes(el.dataset.bind)) {
+  if (['shape', 'devicesOn', 'mcpOn', 'devices.source', 'devices.clab_topology', 'output.kind', 'trigger.source', 'asset_register', 'runbooks', 'forecast', 'configs', 'devices.commands'].includes(el.dataset.bind)) {
     const focusSel = el.dataset.cmd ? `[data-cmd="${el.dataset.cmd}"]` : `[data-bind="${el.dataset.bind}"]${el.type === 'radio' ? `[value="${el.value}"]` : ''}`;
     if (el.dataset.bind === 'devices.source') {
       s.devices.filter = s.devices.source === 'netbox' ? {site: wizOpts.netbox.sites[0]?.slug || '', role: wizOpts.netbox.roles[0]?.slug || ''}
@@ -712,7 +719,11 @@ function wizStep1() {
       <label class="wiz-field">Name <input data-bind="name" value="${esc(s.name)}" placeholder="WAN interface alert"></label>
       ${s.shape === 'alert' ? `<label class="wiz-field">Starts when
         <select data-bind="trigger.source"><option value="sample" ${s.trigger.source === 'sample' ? 'selected' : ''}>A sample alert (for trying it out)</option><option value="prtg" ${s.trigger.source === 'prtg' ? 'selected' : ''}>PRTG raises an alert</option></select></label>
-      <label class="wiz-field">On sensor <select data-bind="trigger.sensor_id">${(wizOpts.sensors || []).map(o => `<option value="${esc(o.id)}" ${o.id === s.trigger.sensor_id ? 'selected' : ''}>${esc(o.id)} · ${esc(o.label)}</option>`).join('')}</select></label>`
+      ${s.trigger.source === 'prtg'
+        ? `<label class="wiz-field">PRTG sensor ID <input data-bind="trigger.sensor_id" value="${esc(s.trigger.sensor_id)}" list="wiz-prtg-sensors" inputmode="numeric" placeholder="e.g. 2143">
+            <datalist id="wiz-prtg-sensors">${(wizOpts.prtg?.alarms || []).map(o => `<option value="${esc(o.id)}">${esc(o.label)}</option>`).join('')}</datalist></label>
+           ${wizOpts.prtg?.configured ? (wizOpts.prtg.alarms.length ? `<p class="wiz-note">${wizOpts.prtg.alarms.length} sensors are in alarm now; start typing to pick one, or enter any sensor ID.</p>` : '') : '<p class="warn">PRTG is not set up yet. Add its URL and token in Settings.</p>'}`
+        : `<label class="wiz-field">On sensor <select data-bind="trigger.sensor_id">${(wizOpts.sensors || []).map(o => `<option value="${esc(o.id)}" ${o.id === s.trigger.sensor_id ? 'selected' : ''}>${esc(o.id)} · ${esc(o.label)}</option>`).join('')}</select></label>`}`
       : `<p class="wiz-note">${s.shape === 'ask' ? 'You start it by typing a question.' : 'You start it by hand; schedule it with <code>python -m bya.graph run</code> from cron or a task scheduler.'}</p>`}
     </div>
     <div class="wiz-actions"><span></span><button class="btn primary big" id="wiz-next">Next: what it may look at</button></div>
@@ -806,7 +817,7 @@ function openReview(p) {
   const doc = p.diagram, agent = doc.blocks.find(b => b.type === 'agent').config;
   const out = doc.blocks.find(b => b.id === 'send');
   const box = $('#review-panel');
-  box.hidden = false;
+  showPanel(box);
   box.innerHTML = `<div class="run-head"><h2>Here is your agent</h2><span class="pill ok">Passes all safety rules</span><button class="btn small" id="close-review" aria-label="Close">×</button></div>
     <p class="desc">Built from your answers. Change anything on the canvas; click a block to see its settings.</p>
     <h3>What BYA set up for you</h3>
@@ -820,16 +831,103 @@ function openReview(p) {
     <h3>${doc.evals.length} tests, ready to run</h3>
     <ul class="tests">${doc.evals.map(c => `<li>${esc(TEST_LABELS[c.id] || c.id)}</li>`).join('')}</ul>
     <div class="draft-actions"><button class="btn primary" id="review-test">Test on sample data</button><button class="btn" id="review-run">Run once</button></div>
+    ${doc.blocks[0].type === 'trigger.alert' && doc.blocks[0].config.source === 'prtg' ? '<div class="draft-actions"><button class="btn" id="review-watch">Save and start on PRTG alarms</button></div>' : ''}
     <p class="muted">Sample data never contacts a device or sends a message. Go live when the tests pass.</p>`;
   $('#close-review').onclick = () => { box.hidden = true; };
+  const watchBtn = $('#review-watch');
+  if (watchBtn) watchBtn.onclick = async () => {
+    const file = slug(doc.name) + '.json';
+    try {
+      await api('/api/diagram/save', {file, diagram});
+      const current = await (await fetch('/api/settings')).json();
+      const files = current.watch.agents.filter(a => a.watched).map(a => a.file);
+      const res = await api('/api/watch', {diagrams: [...new Set([...files, file])]});
+      toast(res.watch.running ? `Saved diagrams/${file}. It starts when sensor ${doc.blocks[0].config.sensor_id} alarms; drafts wait in the Inbox.`
+                              : `Saved diagrams/${file}. Add PRTG's URL and token in Settings to start watching.`);
+    } catch (e) { toast(e.message); }
+  };
   $('#review-run').onclick = () => { box.hidden = true; runDiagram(); };
   $('#review-test').onclick = () => {
     box.hidden = true;
     const panel = $('#evals-panel');
-    panel.hidden = false;
+    showPanel(panel);
     renderEvals();
     $('#ev-run').click();
   };
+}
+
+// ---------- Settings: model, PRTG, NetBox, Slack, entered once ----------
+const SECTIONS = [['Model', 'model', 'Which model the agents use.'], ['PRTG', 'prtg', 'Real alerts and metric history.'],
+  ['NetBox', 'netbox', 'Devices and owners for device scope.'], ['Slack', null, 'Where approved briefs can go.']];
+let settingsData = null;
+
+async function openSettings() {
+  try { settingsData = await (await fetch('/api/settings')).json(); } catch { toast('The local runtime is not reachable.'); return; }
+  $('#settings').hidden = false;
+  renderSettings();
+}
+function renderSettings() {
+  const box = $('#settings'), d = settingsData;
+  const field = f => {
+    const id = `set-${f.key}`, fromEnv = f.source === 'environment';
+    const input = f.secret
+      ? `<input id="${id}" type="password" autocomplete="off" data-key="${f.key}" ${fromEnv ? 'disabled' : ''} placeholder="${f.set ? 'Saved. Type to replace it.' : 'Not set'}">`
+      : `<input id="${id}" data-key="${f.key}" value="${esc(f.value)}" ${fromEnv ? 'disabled' : ''}>`;
+    return `<div class="set-field"><label for="${id}">${esc(f.label)}${fromEnv ? ` <span class="badge">from ${esc(f.env)}</span>` : ''}${f.secret && f.set && !fromEnv ? ' <span class="badge ok">saved</span>' : ''}</label>
+      ${input}<small>${esc(f.help)}</small>
+      ${f.secret && f.set && !fromEnv ? `<button class="linkish" data-clear="${f.key}">Remove saved ${esc(f.label.toLowerCase())}</button>` : ''}</div>`;
+  };
+  const w = d.watch;
+  const watch = `<div class="set-watch"><h3>Agents that start on PRTG alarms</h3>
+    ${w.agents.length ? w.agents.map(a => `<label class="wiz-check"><input type="checkbox" data-watch="${esc(a.file)}" ${a.watched ? 'checked' : ''}>
+      <span><strong>${esc(a.name)}</strong><small>${esc(a.file)} · sensor ${esc(a.sensor_id)}</small></span></label>`).join('')
+      : '<p class="muted">No saved agent starts from a PRTG alert yet. Build one with <strong>Starts when: PRTG raises an alert</strong>, then <strong>Save</strong> it.</p>'}
+    <p class="muted">A watched agent runs once per alarm and stops at its approval; the draft waits in the Inbox. ${w.running ? `Watching every ${w.poll_s} s.` : 'Not watching yet.'}</p>
+    ${w.events.length ? `<ul class="set-events">${w.events.slice(-8).reverse().map(e => `<li><span>${esc(e.at.slice(11, 19))}</span> ${esc(e.text)}</li>`).join('')}</ul>` : ''}
+    ${w.agents.length ? '<button class="btn" id="watch-save">Save watched agents</button>' : ''}</div>`;
+  box.innerHTML = `<header class="wiz-bar"><strong>Settings</strong><span>· saved on this machine</span><button class="btn" id="set-close" aria-label="Close">×</button></header>
+    <div class="set-body"><p class="wiz-lede">Enter these once. Secrets are stored in <code>secrets.local.json</code> on this machine (owner-only) and are never shown again. Values set in the environment when BYA started win and show as "from …".</p>
+    ${SECTIONS.map(([name, test, lede]) => `<section class="set-section" aria-labelledby="sec-${name}"><div class="set-head"><h2 id="sec-${name}">${name}</h2><span class="muted">${lede}</span>
+      ${test ? `<button class="btn" data-test="${test}">Test</button>` : ''}</div>
+      <div class="set-grid">${d.fields.filter(f => f.section === name).map(field).join('')}</div>
+      <p class="set-result" id="res-${test}" aria-live="polite" hidden></p>${name === 'PRTG' ? watch : ''}</section>`).join('')}
+    <section class="set-section"><div class="set-head"><h2>containerlab</h2><span class="muted">A deployed lab in containerlab/.</span><button class="btn" data-test="lab">Test</button></div>
+      <p class="set-result" id="res-lab" aria-live="polite" hidden></p></section>
+    <div class="wiz-actions"><span class="muted">Test uses the saved values: save first.</span><button class="btn primary big" id="set-save">Save settings</button></div></div>`;
+  $('#set-close').onclick = () => { $('#settings').hidden = true; checkSetup(); };
+  $('#set-save').onclick = () => saveSettings([]);
+  box.querySelectorAll('[data-clear]').forEach(b => b.onclick = () => saveSettings([b.dataset.clear]));
+  box.querySelectorAll('[data-test]').forEach(b => b.onclick = async () => {
+    const out = $(`#res-${b.dataset.test}`);
+    out.hidden = false; out.className = 'set-result'; out.textContent = 'Testing…'; b.disabled = true;
+    try { const r = await api('/api/settings/test', {target: b.dataset.test}); out.textContent = r.detail; out.classList.add(r.ok ? 'ok' : 'bad'); }
+    catch (e) { out.textContent = e.message; out.classList.add('bad'); }
+    b.disabled = false;
+  });
+  const ws = $('#watch-save');
+  if (ws) ws.onclick = async () => {
+    const files = [...box.querySelectorAll('[data-watch]')].filter(c => c.checked).map(c => c.dataset.watch);
+    try { settingsData = await api('/api/watch', {diagrams: files}); renderSettings(); toast(files.length ? `Watching PRTG for ${files.length} agent(s).` : 'Stopped watching PRTG.'); }
+    catch (e) { toast(e.message); }
+  };
+}
+async function saveSettings(clear) {
+  const values = {};
+  $('#settings').querySelectorAll('[data-key]').forEach(el => {
+    if (el.disabled) return;
+    const f = settingsData.fields.find(x => x.key === el.dataset.key);
+    if (f.secret && !el.value) return;   // empty secret = keep the saved one
+    values[el.dataset.key] = el.value;
+  });
+  try { settingsData = await api('/api/settings', {values, clear}); wizOpts = null; renderSettings(); toast(clear.length ? 'Removed.' : 'Settings saved.'); }
+  catch (e) { toast(e.message); }
+}
+async function checkSetup() {  // first-run hint: nothing works until a model is set
+  try {
+    const d = await (await fetch('/api/settings')).json();
+    const model = d.fields.find(f => f.key === 'model');
+    $('#setup-banner').hidden = Boolean(model?.value);
+  } catch {}
 }
 
 // ---------- files ----------
@@ -867,6 +965,10 @@ async function init() {
     e.target.value = '';
   };
   $('#new').onclick = openBuilder;
+  $('#settings-btn').onclick = openSettings;
+  $('#setup-open').onclick = openSettings;
+  checkSetup();
+  setInterval(refreshInbox, 30000);  // watched agents add drafts while the studio is open
   $('#export').onclick = () => { save(); download(slug(diagram.name) + '.json', JSON.stringify(diagram, null, 2)); };
   $('#save').onclick = async () => {
     save();
@@ -885,7 +987,7 @@ async function init() {
   $('#run').onclick = runDiagram;
   $('#inbox').onclick = openInbox;
   $('#reach').onclick = () => { const p = $('#reach-panel'); if (!p.hidden) { p.hidden = true; return; } openReach(); };
-  $('#evals').onclick = () => { const p = $('#evals-panel'); p.hidden = !p.hidden; if (!p.hidden) renderEvals(); };
+  $('#evals').onclick = () => { const p = $('#evals-panel'); if (!p.hidden) { p.hidden = true; return; } showPanel(p); renderEvals(); };
   $('#export-py').onclick = exportPython;
   refreshInbox();
   $('#approve').onclick = () => decide(true);

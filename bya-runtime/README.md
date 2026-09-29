@@ -161,6 +161,21 @@ Live mode needs the following one-time configuration. An IT administrator should
 
 ## Configure live connections
 
+**Start with `python3 start.py`** (from `bya-runtime/`). It checks Python, the model endpoint, PRTG, NetBox and a
+containerlab lab, says what is missing, then starts the studio at `http://127.0.0.1:8787/studio.html`.
+
+**Settings** (top bar) is where the model, PRTG, NetBox and Slack are entered, each with a **Test** button. Plain
+values are saved to `config.local.json`; tokens to `secrets.local.json` (owner-only permissions, never shown again).
+Environment variables set before BYA started still win, and the page shows them as "from …". Plain HTTP is refused
+except to localhost and to hosts listed under "Hosts allowed over plain HTTP".
+
+**Agents that start on PRTG alarms:** build an agent with **Starts when: PRTG raises an alert** and a sensor ID, then
+**Save and start on PRTG alarms**. BYA polls PRTG (outbound only; the server still listens on 127.0.0.1 alone) and runs
+the agent once per alarm: when the sensor goes into warning or down, or changes between them. The run stops at its
+approval, so the draft waits in the **Inbox**. The watcher's recent activity is listed in Settings → PRTG.
+
+The sections below describe each connection in detail.
+
 Copy `config.example.json` to `config.local.json` and edit only on the local machine.
 Keep credentials in environment variables. Never put them in agent JSON, SSOT JSON or a shared ZIP.
 Restart the runtime after configuration changes so the interface reflects readiness.
