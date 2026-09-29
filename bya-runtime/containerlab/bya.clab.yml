@@ -32,6 +32,7 @@ topology:
       binds:
         - configs/frr1.conf:/etc/frr/frr.conf
         - configs/frr-daemons:/etc/frr/daemons
+        - configs/vtysh.conf:/etc/frr/vtysh.conf
 
   links:
     - endpoints: ["srl1:e1-1", "srl2:e1-1"]

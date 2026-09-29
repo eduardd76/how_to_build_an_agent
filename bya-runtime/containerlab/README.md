@@ -21,9 +21,11 @@ brew install orbstack          # then open OrbStack once
 orb create ubuntu clab
 orb -m clab bash -c "curl -sL https://containerlab.dev/setup | sudo -E bash -s 'all'"
 orb -m clab bash -c 'sudo usermod -aG docker $USER'
-orb -m clab                    # a shell inside the Linux machine
-cd ~/how_to_build_an_agent/bya-runtime/containerlab
-sudo containerlab deploy -t bya.clab.yml
+curl -fsSL https://get.docker.com | sudo sh     # if the setup script did not install Docker in the machine
+orb -m clab bash -c 'sudo systemctl enable --now docker && sudo usermod -aG clab_admins,docker $USER'
+orb -m clab                    # a shell inside the Linux machine, opened in the same folder
+cd /Users/<you>/how_to_build_an_agent/bya-runtime/containerlab   # your Mac files are under /Users, not ~
+containerlab deploy -t bya.clab.yml
 ```
 
 Run BYA inside the same machine (`cd .. && python3 server.py`), so `docker exec` reaches the lab. Open
