@@ -1,0 +1,4 @@
+[
+  "show ip interface brief",
+  "show processes cpu sorted | exclude 0.00"
+]

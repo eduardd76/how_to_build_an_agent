@@ -1,0 +1,7 @@
+[
+  "show interfaces GigabitEthernet0/1",
+  "show ip interface brief",
+  "show logging | include GigabitEthernet0/1",
+  "show ip bgp summary",
+  "show running-config | include snmp"
+]

@@ -11,6 +11,7 @@ Stop at the first failing stage and fix it before moving on.
 | 4 | PRTG connection | Read-only PRTG API token, one real asset | Half a day |
 | 5 | Slack approval flow | Slack bot token, one **test** channel | 1 hour |
 | 6 | TimesFM forecasting (optional) | PyTorch, TimesFM 2.5 checkpoint, 3+ days of clean history | Half a day |
+| 7 | Read one real device (read-only SSH) | One lab or non-critical device, a read-only SSH account | 1 hour |
 
 Commands are for macOS/Linux. On Windows PowerShell, replace `export NAME=value` with `$env:NAME="value"`.
 All BYA commands run from the `bya-runtime/` directory.
@@ -28,7 +29,7 @@ python server.py
 
 Open `http://127.0.0.1:8787` and keep the terminal open.
 
-- [ ] All tests pass (76 at the time of writing).
+- [ ] All tests pass (100 at the time of writing).
 - [ ] Evals: 8/8 pass (4 incident, 4 forecast).
 - [ ] **Incident brief** template → **Run test** with *Sample data*: the trace shows SSOT, Knowledge, Monitoring, Analysis, Output checks, Delivery policy.
 - [ ] **Capacity forecast** template → **Run test**: a chart appears and the draft starts with `[SAMPLE / trend baseline]`.
@@ -38,7 +39,8 @@ Open `http://127.0.0.1:8787` and keep the terminal open.
 - [ ] Drag from the agent's right-hand port to the **Save to file** block. The canvas refuses, and explains that an output needs a check and an approval first.
 - [ ] Set the agent's model endpoint to your model, open **Evals**, tick **Also test the Python export** and click **Run evals**. Each case shows pass or fail per check, and the export line says whether it matches the diagram.
 - [ ] **Export Python** downloads `incident-brief.py`. From `bya-runtime/`, `PYTHONPATH=. BYA_RUNTIME=. python ~/Downloads/incident-brief.py` runs it with approvals in the terminal.
-- [ ] **Start from… → Capacity forecast** and **Config review** both show **Ready to run**. With your model set on the agent, each passes its evals (3/3).
+- [ ] **Start from… → Capacity forecast**, **Config review** and **Interface check** each show **Ready to run**. With your model set on the agent, each passes its evals (3/3).
+- [ ] **Interface check → Reach** shows 2 devices readable, 0 change paths and 0 device config sessions.
 
 Stop the server with `Ctrl+C`.
 
@@ -187,6 +189,31 @@ Pick a gauge sensor (not a raw counter) with at least 3 days of complete 5-minut
 What this stage does **not** prove: that the forecasts are useful. That needs several weeks of held-out data and real threshold events.
 
 **Clock change:** clocks in Europe go back on 25 October 2026. A forecast run in the 7 days after that includes the repeated hour. Expected result: blocked with "Duplicate, unordered or missing time buckets", not a forecast.
+
+---
+
+## Stage 7 — Read one real device (read-only SSH)
+
+Use a lab or non-critical device and an account that is read-only on the device itself (privilege level 1, or a read-only role). BYA's filter is one layer; the device account is the second.
+
+```sh
+# 1. SSH works non-interactively from this machine (keys, known_hosts):
+ssh -T -o BatchMode=yes <device> "show clock"
+
+# 2. Point the Interface check template at it: in the studio, select the Device commands block and set
+#    Devices from = list, Devices = <device>, SSH user variable = BYA_SSH_USER (or leave empty to use ~/.ssh/config).
+export BYA_SSH_USER=<read-only user>
+
+# 3. Check the reach before running:
+python -m bya.graph reach diagrams/<your-copy>.json --live
+```
+
+- [ ] Step 1 prints the time without asking for a password or a host-key confirmation.
+- [ ] Reach lists exactly your one device, the allowed commands, and 0 device config sessions.
+- [ ] A live run shows each command in the trace as `<device># show …`, with real output in the draft's evidence.
+- [ ] Ask the agent (in the alert text or the instructions) to "clear the counters". The trace shows the command as **DROP** and the device's counters are unchanged (`show interfaces` before and after).
+- [ ] `show running-config | include snmp` returns `community ****`; the real community never appears in the trace or the draft.
+- [ ] Your device's own AAA or syslog shows only `show` commands from the BYA account.
 
 ---
 

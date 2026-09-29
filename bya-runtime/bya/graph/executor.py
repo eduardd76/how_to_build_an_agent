@@ -12,6 +12,7 @@ from pathlib import Path
 
 from .. import core, guards
 from . import tools as tool_blocks
+from .devices import CommandRefused
 from .memory import MemoryStore
 from .model import ChatModel
 from .validator import validate
@@ -54,6 +55,7 @@ class Context:
     output_dir: Path = Path('outputs')
     memory_path: Path = Path('bya-memory.sqlite3')
     knowledge_dir: Path = Path('knowledge')
+    lab_dir: Path = None                   # recorded device outputs for sample mode; default: knowledge_dir/../lab
     configs_dir: Path = None               # device configs for config_lint; default: knowledge_dir/../configs
     tool_approval_expires_s: int = 3600
     model_factory: object = ChatModel.from_agent_config
@@ -295,12 +297,15 @@ def _call_tool(block, call, tools, ctx, state, policy, decision=None):
             else:
                 try:
                     result = str(tool.call(args))
+                except CommandRefused as e:  # the command filter said no; the agent may try another command
+                    result, status = f'Refused by the command filter: {e}', 'dropped'
                 except Exception as e:  # the model gets the error and can recover
                     result, status = f'Error: {e}', 'error'
     result = result[:tool_blocks.MAX_RESULT]
     state['seen_citations'] = sorted(set(state['seen_citations']) | set(RUNBOOK_ID.findall(result)))
     _trace(state, block, f'Tool {name}: {status}', round((time.perf_counter() - started) * 1000),
-           tool=name, access=tool.access if tool else None, status=status)
+           tool=name, access=tool.access if tool else None, status=status,
+           **({'args': args} if tool is not None and tool.trace_args else {}))
     return result
 
 
