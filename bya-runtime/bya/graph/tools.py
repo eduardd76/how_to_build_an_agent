@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .. import core, forecasting, validation
+from .devices import DeviceReader
 from .mcp import McpClient
 from .memory import MemoryStore, search_documents
 
@@ -25,6 +26,7 @@ class Tool:
     access: str
     call: object       # function(args: dict) -> str
     block_id: str
+    trace_args: bool = False  # record the arguments in the trace (device commands)
 
     def schema(self):
         return {'type': 'function', 'function': {
@@ -39,6 +41,12 @@ def open_tools(block, ctx):
         return [_http(block)], (lambda: None)
     if block.type == 'tool.mcp':
         return _mcp(block)
+    if block.type == 'tool.device':
+        reader = DeviceReader(block.config, ctx)
+        params = {'type': 'object', 'properties': {'device': {'type': 'string', 'description': 'Exact device name'},
+                                                   'command': {'type': 'string', 'description': 'One read-only command'}},
+                  'required': ['device', 'command']}
+        return [Tool('device_command', reader.description(), params, 'read', reader, block.id, trace_args=True)], (lambda: None)
     if block.type == 'memory.kv':
         return _memory_kv(block, ctx), (lambda: None)
     if block.type == 'memory.documents':

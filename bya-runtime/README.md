@@ -57,7 +57,7 @@ The canvas refuses connections the rules never allow, and says why (for example,
 |---|---|
 | Trigger | `trigger.manual`, `trigger.webhook`, `trigger.alert` (sample or PRTG) |
 | Agent | `agent`: instructions, model endpoint, `max_steps`, `token_budget`, `timeout_s` |
-| Tool (attached) | `tool.builtin` (calculator, time, asset lookup, runbook search, metric forecast, config check), `tool.http`, `tool.mcp` (local MCP servers over stdio) |
+| Tool (attached) | `tool.builtin` (calculator, time, asset lookup, runbook search, metric forecast, config check), `tool.device` (read-only commands on network devices), `tool.http`, `tool.mcp` (local MCP servers over stdio) |
 | Memory (attached) | `memory.kv` (remember/recall facts across runs), `memory.conversation` (inputs and results of the last completed runs), `memory.documents` (keyword search over `knowledge/`) |
 | Guardrail | `guard.policy` (attached: denied tools, tools that always need approval, max tool calls), `guard.redact` (removes secrets, and optionally emails and IPs, from the draft), `guard.output_check`, `guard.approval` |
 | Output | `output.file`, `output.webhook`, `output.slack` |
@@ -69,6 +69,7 @@ The canvas refuses connections the rules never allow, and says why (for example,
 | Incident brief | alert → agent → output check → approval → file | Asset lookup and runbook search; cites only runbooks the tools returned |
 | Capacity forecast | request → agent → output check → approval → file | `metric_forecast` backtests against a seasonal-naive baseline and returns a one-sentence summary (crossing and baseline verdict) that the agent repeats; run history memory compares with earlier runs. Sample mode uses a trend baseline; live mode uses TimesFM and never falls back |
 | Config review | file name → agent → redact → output check → approval → file | `config_lint` reads one file from `configs/`, checks 10 IOS-style rules, masks secrets and returns a ready-made report that the agent must repeat verbatim; document search explains each rule from `knowledge/config-standards.md`; the output check blocks a "fully compliant" claim |
+| Interface check | alert → agent → output check → approval → file | Reads the alerting device with `device_command` (interface counters, logs) in addition to the asset register and runbooks. Sample mode replays `lab/` recordings |
 
 The config rules and the standard are samples: replace `knowledge/config-standards.md` with your own standard, and put configuration backups in `configs/`.
 
@@ -126,6 +127,18 @@ python -m bya.graph eval diagrams/incident-brief.json --export      # diagram an
 python -m bya.graph export diagrams/incident-brief.json -o agent.py
 python agent.py                                                      # needs BYA_RUNTIME if moved elsewhere
 ```
+
+**Reading devices safely (`tool.device`):**
+- The model never holds a device session. It asks for one command on one device through the `device_command` tool, and a command filter decides.
+- A command runs only if the device is in the block's scope, the command starts with `show`, `display`, `ping` or `traceroute` written in full, and it matches one of the block's allow patterns (for example `show interfaces *`).
+- Separators, redirects and control characters (`;`, `&`, `>`, `$`, newlines) are refused, and output pipes are limited to read-only filters (`include`, `exclude`, `begin`, `section`, `count`). Words such as `configure`, `reload`, `write`, `copy`, `delete`, `debug`, `clear` and `redirect` are always refused. Abbreviations such as `sh` or `conf t` are refused.
+- A refused command is shown as **DROP** in the run trace; the agent is told why and carries on.
+- Scope comes from the asset register (`ssot.json`), NetBox (`/api/dcim/devices/` filtered by site, role or tag) or a fixed list. The validator refuses an empty filter, a wildcard allowlist, and write access.
+- Passwords, secrets, keys and SNMP communities are masked in device output before the model sees it. Each run has a command budget, and live mode paces commands per device.
+- Sample mode never contacts a device: it replays `lab/<device>/<command>.txt`. Live mode runs `ssh -T -o BatchMode=yes -- <device> <command>` with the jump host's own OpenSSH keys, config and `known_hosts`; host keys stay checked and no shell is involved on this side.
+- The filter is built for network OS command lines (IOS, IOS-XE, NX-OS, EOS, Junos, VRP). On Linux-based devices the SSH command runs in a remote shell, so also give BYA an account that is read-only on the device (a restricted shell or an SSH forced command). Use a read-only device account everywhere: it is the second layer if the filter ever misses something.
+
+**Reach** in the top bar, or `python -m bya.graph reach <diagram>`, lists everything a diagram's agents could touch before it runs: devices and allowed commands, read tools, change paths (each approved), memory, outputs, and whether prompts go to a remote model.
 
 Current limit: MCP servers must be local (stdio); remote MCP isn't supported yet.
 

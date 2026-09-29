@@ -1,0 +1,4 @@
+CPU utilization for five seconds: 38%/4%; one minute: 41%; five minutes: 39%
+ PID Runtime(ms)     Invoked      uSecs   5Sec   1Min   5Min TTY Process
+ 214    98231221     4211002      23326  12.47% 13.02% 12.88%   0 BGP Router
+ 188    41220019     9211400       4474   6.11%  6.30%  6.21%   0 IP Input

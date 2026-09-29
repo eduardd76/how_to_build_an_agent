@@ -9,12 +9,14 @@ Safety rules:
   no-secrets                   credentials are referenced by environment-variable name only
   no-sample-live               sample data sources cannot run in live mode
   one-policy                   at most one permission policy per agent
+  device-read-only             device commands are read-only, scoped, and allow only full read verbs
 plus structural rules (known-type, reference, attachment, flow-wire, unreachable, unattached, config).
 """
 import re
 from dataclasses import asdict, dataclass
 
 from .catalog import AGENT_LIMITS, BUILTIN_FUNCTIONS, NAMESPACE_LIMITS, SPECS
+from .devices import pattern_problems
 
 ENV_NAME = re.compile(r'^[A-Z_][A-Z0-9_]*$')
 TOOL_NAME = re.compile(r'^[A-Za-z0-9_-]{1,64}$')
@@ -213,6 +215,29 @@ def _check_config(b, add, mode):
                 add(k, 'config', f'"{key}" must be a list of tool names.')
         if 'env_from' in cfg and not _env_map(cfg['env_from']):
             add(k, 'config', '"env_from" must map variable names to environment variable names.')
+    elif b.type == 'tool.device':
+        if cfg.get('access') != 'read':
+            add(k, 'device-read-only', 'Device commands are read-only; set "access" to "read". Changes go through a change request.')
+        allow = cfg.get('allow')
+        if not isinstance(allow, list) or not allow or not all(isinstance(p, str) for p in allow):
+            add(k, 'device-read-only', 'List the allowed commands in "allow", for example "show interfaces *".')
+        else:
+            for pattern in allow:
+                for problem in pattern_problems(pattern):
+                    add(k, 'device-read-only', problem)
+        source = cfg.get('scope_source', 'ssot')
+        if source not in ('ssot', 'netbox', 'list'):
+            add(k, 'config', '"scope_source" must be ssot, netbox or list.')
+        elif source == 'list' and not (isinstance(cfg.get('devices'), list) and cfg['devices']):
+            add(k, 'device-read-only', 'List the devices this agent may read.')
+        elif source != 'list' and not (isinstance(cfg.get('scope_filter'), dict) and cfg['scope_filter']):
+            add(k, 'device-read-only', 'Set a device filter; an empty filter would give the agent every device.')
+        t = cfg.get('timeout_s', 20)
+        if not isinstance(t, int) or isinstance(t, bool) or not 5 <= t <= 120:
+            add(k, 'config', '"timeout_s" must be a whole number between 5 and 120.')
+        for key in ('username_env', 'netbox_url_env', 'netbox_token_env'):
+            if cfg.get(key) and not ENV_NAME.match(str(cfg[key])):
+                add(k, 'config', f'"{key}" must be an environment variable name.')
     elif b.type in ('memory.kv', 'memory.conversation'):
         if not NAMESPACE.match(str(cfg.get('namespace', ''))):
             add(k, 'config', '"namespace" must be 1–40 lower-case letters, digits, "_" or "-".')

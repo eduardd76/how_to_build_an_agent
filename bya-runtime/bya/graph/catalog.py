@@ -23,6 +23,7 @@ SPECS = {spec.type: spec for spec in (
     BlockSpec('tool.builtin', 'tool', attachable=True),
     BlockSpec('tool.http', 'tool', attachable=True),
     BlockSpec('tool.mcp', 'tool', attachable=True),
+    BlockSpec('tool.device', 'tool', attachable=True),
     BlockSpec('memory.kv', 'memory', attachable=True),
     BlockSpec('memory.conversation', 'memory', attachable=True),
     BlockSpec('memory.documents', 'memory', attachable=True),
@@ -36,7 +37,8 @@ SPECS = {spec.type: spec for spec in (
 )}
 
 BUILTIN_FUNCTIONS = ('calculator', 'time_now', 'asset_lookup', 'runbook_search', 'metric_forecast', 'config_lint')
-NAMESPACE_LIMITS = {'max_entries': (1, 1000), 'max_items': (1, 20), 'max_results': (1, 10), 'max_tool_calls': (1, 200)}
+NAMESPACE_LIMITS = {'max_entries': (1, 1000), 'max_items': (1, 20), 'max_results': (1, 10), 'max_tool_calls': (1, 200),
+                    'max_commands': (1, 200), 'min_interval_s': (0, 60)}
 
 AGENT_LIMITS = {
     'max_steps': (1, 50),
@@ -83,6 +85,21 @@ UI = {
         _f('allow_tools', 'Only these tools', 'list', default=[], help='Empty = all tools the server offers.'),
         _f('write_tools', 'Write tools', 'list', default=[], help='Tools that change state; each call needs approval.'),
         _f('env_from', 'Environment (JSON)', 'json', default={}, help='{"SERVER_VAR": "YOUR_ENV_VAR"}')]),
+    'tool.device': ('Device commands', 'Read-only commands on network devices over SSH, through a command filter.', [
+        _f('scope_source', 'Devices from', 'select', options=['ssot', 'netbox', 'list'], default='ssot',
+           help='Asset register, NetBox, or a fixed list.'),
+        _f('scope_filter', 'Device filter (JSON)', 'json', default={'site': 'Munich / HQ'},
+           help='Asset register: site, owner, service, name. NetBox: site, role, tag (slugs).'),
+        _f('devices', 'Devices (list source)', 'list', default=[]),
+        _f('allow', 'Allowed commands', 'list', default=['show *'],
+           help='Patterns such as "show interfaces *". Only show, display, ping and traceroute.'),
+        _f('max_commands', 'Max commands per run', 'number', default=20, min=1, max=200),
+        _f('min_interval_s', 'Seconds between commands per device', 'number', default=2, min=0, max=60),
+        _f('timeout_s', 'Command timeout (seconds)', 'number', default=20, min=5, max=120),
+        _f('username_env', 'SSH user variable', default='', help='Empty = your SSH config decides.'),
+        _f('netbox_url_env', 'NetBox URL variable', default='NETBOX_URL'),
+        _f('netbox_token_env', 'NetBox token variable', default='NETBOX_TOKEN'),
+        _f('access', 'Access', 'select', options=['read'], default='read')]),
     'memory.kv': ('Fact memory', 'Lets the agent remember and recall facts across runs (remember / recall tools).', [
         _f('namespace', 'Namespace', default='facts', help='Agents sharing a namespace share facts.'),
         _f('max_entries', 'Max facts', 'number', default=200, min=1, max=1000)]),

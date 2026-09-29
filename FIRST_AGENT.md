@@ -17,13 +17,14 @@ Open `http://127.0.0.1:8787/studio.html`.
 
 ## 2. Start from a template (3 minutes)
 
-**Start from…** offers three templates. Each one is read-only and ends in a human approval.
+**Start from…** offers four templates. Each one is read-only and ends in a human approval.
 
 | Template | Starts from | Tools | What it writes |
 |---|---|---|---|
 | Incident brief | A monitoring alert | Asset lookup, runbook search | What is observed, who owns it, read-only checks with runbook ids |
 | Capacity forecast | A request, for example "sensor 1001 against 80 %" | Metric forecast, asset lookup, runbook search; remembers its last runs | When a metric may cross a threshold, and whether the forecast beat a seasonal baseline |
 | Config review | A config file name, for example `sample-branch-edge.cfg` | Config check, document search over your standard | Findings by severity with rule ids and fixes; secrets redacted |
+| Interface check | A monitoring alert | Device commands (read-only `show` commands through a filter), asset lookup, runbook search | What the device shows, quoted with the command it came from |
 
 The status in the top bar says **Ready to run** when the diagram passes every safety rule.
 
@@ -51,6 +52,7 @@ Pick a tool you already have. Two ways to connect it:
 
 - **HTTP tool:** any JSON API, for example NetBox (`GET https://netbox.example.com/api/dcim/devices/?name={name}`).
   Headers come from environment variables: `{"Authorization": "NETBOX_AUTH"}`, with `NETBOX_AUTH` set to `Token <your token>`.
+- **Device commands:** read-only `show` commands on your devices over SSH. Set the device filter (asset register, NetBox site/role/tag, or a list) and the allowed commands, then open **Reach** to check exactly which devices are in scope. Sample mode replays `lab/` recordings; live mode uses your SSH keys and config.
 - **MCP server:** any local MCP server over stdio, for example a Git or ticketing server.
   List the tools that change something under **Write tools**; each call to one pauses the run until you allow it in the **Inbox**.
 

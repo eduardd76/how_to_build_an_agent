@@ -87,7 +87,7 @@ class StudioApiTests(unittest.TestCase):
 
     def test_catalog_and_templates(self):
         types = {t['type']: t for t in self.get('/api/catalog')['types']}
-        self.assertEqual(len(types), 17)
+        self.assertEqual(len(types), 18)
         self.assertTrue(types['tool.mcp']['attachable'])
         self.assertEqual(types['output.slack']['inputs'], ['approved_draft'])
         self.assertIn('instructions', [f['key'] for f in types['agent']['fields']])

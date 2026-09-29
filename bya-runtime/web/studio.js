@@ -127,6 +127,7 @@ function summary(b) {
     case 'tool.builtin': return (c.functions || []).join(', ');
     case 'tool.http': return `${c.method || 'GET'} ${c.name || ''} · ${c.access || '?'}`;
     case 'tool.mcp': return `${(c.command || []).join(' ')} · ${c.access || '?'}`;
+    case 'tool.device': return `${c.scope_source === 'list' ? `${(c.devices || []).length} devices` : `${c.scope_source || 'ssot'} ${Object.values(c.scope_filter || {}).join(', ')}`} · ${(c.allow || []).length} allowed`;
     case 'guard.approval': return `Expires in ${Math.round((c.expires_s || 3600) / 60)} min`;
     case 'guard.output_check': return c.allowed_citations === 'seen_in_tool_results' ? 'Citations from tools only' : 'Action & root-cause checks';
     case 'memory.kv': return `Facts · ${c.namespace || '?'}`;
@@ -357,6 +358,7 @@ function renderInspector() {
     .filter(({p}) => p.includes(b.id));
   box.innerHTML = `<p class="desc"><strong>${esc(s?.label || b.type)}</strong><br>${esc(s?.description || '')}</p>
     ${mine.length ? `<ul class="issues">${mine.map(v => `<li>${esc(v.message)}</li>`).join('')}</ul>` : ''}
+    ${b.type === 'tool.device' ? `<p class="warn">Live mode runs the allowed commands over SSH from this machine, with your SSH keys and config. Sample mode never contacts a device: it replays <code>lab/</code> recordings. Open <strong>Reach</strong> to see every device in scope.</p>` : ''}
     ${b.type === 'tool.mcp' ? `<p class="warn">Running this diagram starts a local program: <code>${esc((b.config.command || []).join(' '))}</code>. Only run MCP servers you trust.</p>` : ''}
     <div class="field"><label for="block-id">Name</label><input id="block-id" value="${esc(b.id)}" autocomplete="off"><small class="rename-error" role="alert" hidden></small></div>
     ${(s?.fields || []).map((f, i) => fieldHtml(f, b.config[f.key], i)).join('')}
@@ -425,7 +427,7 @@ function renderRun(state) {
     rejected: ['bad', 'Rejected'], expired: ['bad', 'Approval expired'], failed: ['bad', 'Failed'], invalid: ['bad', 'Diagram has problems'], running: ['wait', 'Running…']};
   const [cls, text] = labels[state.status] || ['', state.status];
   $('#run-status').className = 'pill ' + cls; $('#run-status').textContent = text;
-  const rows = (state.trace || []).map(t => `<li class="${t.tool ? 'tool' : ''} ${String(t.detail).startsWith('Failed') ? 'fail' : ''}"><strong>${esc(t.block)}</strong> ${esc(t.detail)}<span class="ms">${t.ms} ms</span></li>`);
+  const rows = (state.trace || []).map(t => `<li class="${t.tool ? 'tool' : ''} ${String(t.detail).startsWith('Failed') ? 'fail' : ''} ${t.status === 'dropped' ? 'dropped' : ''}"><strong>${esc(t.block)}</strong> ${esc(t.detail)}${t.args?.command ? ` <code>${esc(t.args.device)}# ${esc(t.args.command)}</code>` : ''}${t.status === 'dropped' ? ' <span class="drop">DROP</span>' : ''}<span class="ms">${t.ms} ms</span></li>`);
   if (state.error) rows.push(`<li class="fail">${esc(state.error)}</li>`);
   (state.violations || []).forEach(v => rows.push(`<li class="fail">${esc(typeof v === 'string' ? v : v.message)}</li>`));
   $('#trace').innerHTML = rows.join('');
@@ -442,6 +444,36 @@ function renderRun(state) {
 }
 function prettyArgs(args) {
   try { return JSON.stringify(typeof args === 'string' ? JSON.parse(args) : args, null, 2); } catch { return String(args); }
+}
+
+// ---------- reach: what the agents could touch, before anything runs ----------
+async function openReach() {
+  const box = $('#reach-panel');
+  box.hidden = false;
+  box.innerHTML = '<p class="muted">Working out reach…</p>';
+  let r;
+  try { r = await api('/api/diagram/reach', {diagram, mode: $('#mode').value}); }
+  catch (e) { box.innerHTML = `<p class="warn">${esc(e.message)}</p>`; return; }
+  const s = r.summary;
+  const tile = (n, label, cls) => `<div class="tile ${cls}"><strong>${n}</strong><span>${label}</span></div>`;
+  const list = (items, fmt) => items.length ? `<ul>${items.map(fmt).join('')}</ul>` : '';
+  box.innerHTML = `<div class="run-head"><h2>Reach</h2><button class="btn small" id="close-reach" aria-label="Close reach">×</button></div>
+    <p class="desc">Everything these agents could touch, worked out from the diagram before it runs.</p>
+    <div class="tiles">${tile(s.devices_readable, 'devices readable', 'read')}${tile(s.read_tools, 'read tools', 'read')}
+      ${tile(s.change_paths, 'change paths, each approved', s.change_paths ? 'change' : '')}${tile(s.device_config_paths, 'device config sessions', '')}</div>
+    ${s.remote_models.length ? `<p class="warn">Prompts and tool results go to a remote model: ${esc(s.remote_models.join(', '))}.</p>` : ''}
+    ${r.agents.map(a => `<section class="reach-agent"><h3>${esc(a.agent)} <small>${esc(a.model)} · ${esc(a.model_location)}</small></h3>
+      ${a.devices.map(d => `<div class="reach-group"><div class="eyebrow read">Devices · read only</div>
+        <p>${d.error ? `<span class="warn">${esc(d.error)}</span>` : esc(d.devices.join(', ') || 'none match')}</p>
+        <p class="muted">From ${esc(d.source)} ${esc(JSON.stringify(d.filter))} · max ${esc(d.max_commands)} commands per run</p>
+        <p>Allowed ${d.allow.map(x => `<code class="read">${esc(x)}</code>`).join(' ')}</p>
+        <p>Always blocked ${d.always_denied.map(x => `<code>${esc(x)}</code>`).join(' ')}</p></div>`).join('')}
+      ${a.read.length ? `<div class="reach-group"><div class="eyebrow read">Read</div>${list(a.read, x => `<li>${esc(x.system)}: ${esc(x.what)}</li>`)}</div>` : ''}
+      ${a.change.length ? `<div class="reach-group"><div class="eyebrow change">Change · each call approved</div>${list(a.change, x => `<li>${esc(x.system)}: ${esc(x.what)}</li>`)}</div>` : ''}
+      ${a.memory.length ? `<div class="reach-group"><div class="eyebrow">Memory</div>${list(a.memory, m => `<li>${esc(m.type)} · ${esc(m.namespace)}</li>`)}</div>` : ''}
+    </section>`).join('')}
+    ${r.outputs.length ? `<div class="reach-group"><div class="eyebrow">Outputs · only after approval</div>${list(r.outputs, o => `<li>${esc(o.type)} → ${esc(o.where)}</li>`)}</div>` : ''}`;
+  $('#close-reach').onclick = () => { box.hidden = true; };
 }
 
 // ---------- inbox: everything waiting for a human, across runs ----------
@@ -620,6 +652,7 @@ async function init() {
   $('#mode').onchange = () => changed();
   $('#run').onclick = runDiagram;
   $('#inbox').onclick = openInbox;
+  $('#reach').onclick = () => { const p = $('#reach-panel'); if (!p.hidden) { p.hidden = true; return; } openReach(); };
   $('#evals').onclick = () => { const p = $('#evals-panel'); p.hidden = !p.hidden; if (!p.hidden) renderEvals(); };
   $('#export-py').onclick = exportPython;
   refreshInbox();

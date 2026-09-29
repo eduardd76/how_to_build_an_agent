@@ -4,6 +4,7 @@
     python -m bya.graph run diagrams/incident-brief.json [--live] [--input TEXT]
     python -m bya.graph eval diagrams/incident-brief.json [--repeat N] [--export]
     python -m bya.graph export diagrams/incident-brief.json [-o incident-brief.py]
+    python -m bya.graph reach diagrams/interface-check.json [--live]
 
 Run from the bya-runtime directory. Approvals are asked for in the terminal.
 """
@@ -15,6 +16,7 @@ from pathlib import Path
 from .. import adapters
 from . import Context, DiagramError, DiagramInvalid, StepFailed, evals, load_file, run, validate
 from .export import export_python
+from .reach import reach
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -38,9 +40,29 @@ def _print_report(label, report):
         print(f'  {"PASS" if r["passed"] else "FAIL"}  {r["id"]:<28} run {r["run"]}  status={r["status"]}{suffix}')
 
 
+def _print_reach(r):
+    s = r['summary']
+    print(f"Devices readable: {s['devices_readable']} · read tools: {s['read_tools']} · change paths (each approved): "
+          f"{s['change_paths']} · outputs after approval: {s['outputs_after_approval']} · device config sessions: {s['device_config_paths']}")
+    for a in r['agents']:
+        print(f"\nAgent {a['agent']} · model {a['model']} ({a['model_location']})")
+        for x in a['read']:
+            print(f"  read    {x['system']}: {x['what']}")
+        for d in a['devices']:
+            where = ', '.join(d['devices'][:10]) + (f" … {len(d['devices']) - 10} more" if len(d['devices']) > 10 else '')
+            print(f"  devices {d['source']} {json.dumps(d['filter'])}: {where or d['error']}")
+            print(f"          allowed: {', '.join(d['allow'])} · max {d['max_commands']} commands per run")
+        for x in a['change']:
+            print(f"  CHANGE  {x['system']}: {x['what']} (each call needs approval)")
+        for m in a['memory']:
+            print(f"  memory  {m['type']} {m['namespace']}")
+    for o in r['outputs']:
+        print(f"\nOutput {o['block']} ({o['type']}) → {o['where']}, only after approval")
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog='python -m bya.graph')
-    p.add_argument('command', choices=['validate', 'run', 'eval', 'export'])
+    p.add_argument('command', choices=['validate', 'run', 'eval', 'export', 'reach'])
     p.add_argument('diagram')
     p.add_argument('--live', action='store_true', help='live mode: real data sources only')
     p.add_argument('--input', default=None, help='input for a manual trigger')
@@ -83,7 +105,11 @@ def main(argv=None):
         approve=lambda block, draft: _ask(f'\n--- Draft ---\n{draft}\n--- End ---\nApprove at "{block.id}"?'),
         approve_tool=lambda block_id, tool, a: _ask(f'\nAgent "{block_id}" wants to call write tool "{tool}" with {json.dumps(a)}. Allow?'),
         output_dir=ROOT / 'outputs', memory_path=ROOT / 'bya.sqlite3', knowledge_dir=ROOT / 'knowledge',
+        lab_dir=ROOT / 'lab', configs_dir=ROOT / 'configs',
     )
+    if args.command == 'reach':
+        _print_reach(reach(diagram, ctx))
+        return 0
     if args.command == 'eval':
         doc = json.loads(Path(args.diagram).read_text())
         cases = doc.get('evals', [])
