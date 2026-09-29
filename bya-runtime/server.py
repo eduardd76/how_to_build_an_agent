@@ -281,6 +281,7 @@ def builder_options():
                        for a in assets for s in a.get('sensors', [])],
            'configs': sorted(p.name for p in (ROOT / 'configs').glob('*.cfg')),
            'labs': sorted(str(p.relative_to(ROOT)) for p in (ROOT / 'containerlab').glob('clab-*/topology-data.json')),
+           'default_model': os.environ.get('LLM_MODEL', ''), 'default_model_url': os.environ.get('LLM_BASE_URL', ''),
            'netbox': {'configured': bool(os.environ.get('NETBOX_URL') and os.environ.get('NETBOX_TOKEN')), 'sites': [], 'roles': []}}
     if out['netbox']['configured']:
         base, auth = os.environ['NETBOX_URL'].rstrip('/'), {'Authorization': f"Token {os.environ['NETBOX_TOKEN']}"}

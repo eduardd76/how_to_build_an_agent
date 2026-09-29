@@ -28,7 +28,16 @@ cd /Users/<you>/how_to_build_an_agent/bya-runtime/containerlab   # your Mac file
 containerlab deploy -t bya.clab.yml
 ```
 
-Run BYA inside the same machine (`cd .. && python3 server.py`), so `docker exec` reaches the lab. Open
+Run BYA inside the same machine, so `docker exec` reaches the lab. Ollama runs on the Mac; from the machine it is
+`host.orb.internal`:
+
+```sh
+cd /Users/<you>/how_to_build_an_agent/bya-runtime
+LLM_MODEL=qwen2.5:7b LLM_BASE_URL=http://host.orb.internal:11434/v1 python3 server.py
+```
+
+If `curl -s http://host.orb.internal:11434/v1/models` is refused from the machine, start Ollama on the Mac with
+`OLLAMA_HOST=0.0.0.0 ollama serve`. Open
 `http://127.0.0.1:8787/studio.html` on the Mac; OrbStack forwards it (or use `http://clab.orb.local:8787`).
 
 **Linux:** install containerlab and run `sudo containerlab deploy -t bya.clab.yml` from this folder.

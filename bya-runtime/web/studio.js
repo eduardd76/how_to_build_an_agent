@@ -759,8 +759,8 @@ function wizStep2() {
         : s.output.kind === 'webhook' ? `<label class="wiz-field">URL <input data-bind="output.url" value="${esc(s.output.url)}" placeholder="https://"></label>` : '<span></span>'}
       <label class="wiz-field">Approved first by <input data-bind="approver" value="${esc(s.approver)}"></label>
       <label class="wiz-check"><input type="checkbox" data-bind="memory" ${s.memory ? 'checked' : ''}>Remember its last 5 runs</label>
-      <label class="wiz-field">Model <input data-bind="model.model" value="${esc(s.model.model)}" placeholder="LLM_MODEL (e.g. qwen2.5:7b)"></label>
-      <label class="wiz-field">Model endpoint <input data-bind="model.model_url" value="${esc(s.model.model_url)}" placeholder="LLM_BASE_URL or Ollama on this machine"></label>
+      <label class="wiz-field">Model <input id="wiz-model" data-bind="model.model" value="${esc(s.model.model)}" placeholder="${esc(wizOpts.default_model ? `${wizOpts.default_model} (server default)` : 'Required, e.g. qwen2.5:7b')}"></label>
+      <label class="wiz-field">Model endpoint <input data-bind="model.model_url" value="${esc(s.model.model_url)}" placeholder="${esc(wizOpts.default_model_url || 'Ollama on this machine (http://127.0.0.1:11434/v1)')}"></label>
     </div></div>
     <div class="wiz-actions"><button class="btn" id="wiz-back">Back</button><button class="btn primary big" id="wiz-build">Build the agent</button></div>
   </main><aside class="wiz-side" id="wiz-preview" aria-live="polite"></aside></div>`;
@@ -787,6 +787,11 @@ function wizRenderPreview() {
     <p class="wiz-note">Updates as you tick. Credentials come from this machine's settings, never from the agent.</p>`;
 }
 async function wizBuild() {
+  if (!wiz.spec.model.model.trim() && !wizOpts.default_model) {  // otherwise the first run fails with "set the model"
+    toast('Enter the model name (for example qwen2.5:7b). Run "ollama list" to see yours.');
+    $('#wiz-model')?.focus();
+    return;
+  }
   const btn = $('#wiz-build');
   btn.disabled = true;
   let p;

@@ -163,7 +163,8 @@ def _flush_memory(state, ctx):
 
 def _trigger_manual(block, value, diagram, ctx, state):
     text = '' if value is None else str(value)
-    return f'Manual input ({len(text)} characters)', text or block.config.get('default_input', '')
+    value = text or block.config.get('default_input', '')
+    return (f'Manual input ({len(text)} characters)' if text else f'Default input ({len(value)} characters)'), value
 
 
 def _trigger_webhook(block, value, diagram, ctx, state):
