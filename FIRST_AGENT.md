@@ -15,7 +15,18 @@ python server.py
 
 Open `http://127.0.0.1:8787/studio.html`.
 
-## 2. Start from a template (3 minutes)
+## 2. Describe the job, or start from a template (3 minutes)
+
+Click **New agent**. Three short steps, no blocks yet:
+
+1. **The job:** pick the kind of job (investigate an alert, write a regular report, review before a change, answer when I ask) and write it in one sentence. One agent does one job: something you would write a runbook for, not a single command.
+2. **What it may look at:** tick the devices (site from the asset register or NetBox) and the kinds of commands, the asset register, runbooks, and your own MCP server if you have one. Choose where the result goes and who approves it. The panel on the right shows what the agent will be able to touch; it updates as you tick.
+3. **Build the agent:** BYA draws the diagram with the output check, approval and limits already in place, drafts the instructions from your sentence, and adds three starter tests. Click **Test on sample data**.
+
+The builder is plain rules, not AI: the same answers always give the same diagram, and it passes the same safety checks as a hand-drawn one.
+
+Prefer to start from a finished example? Use a template instead:
+
 
 **Start from…** offers four templates. Each one is read-only and ends in a human approval.
 

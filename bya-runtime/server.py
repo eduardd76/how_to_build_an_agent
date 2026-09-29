@@ -10,9 +10,9 @@ import urllib.parse
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from bya import adapters, graph, pipeline, prompts, validation
+from bya import adapters, core, graph, pipeline, prompts, validation
 from bya.core import UTC, date
-from bya.graph import evals
+from bya.graph import builder, evals
 from bya.graph.catalog import catalog
 from bya.graph.export import export_python
 from bya.graph.reach import reach
@@ -80,6 +80,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json(read('ssot.json'))
         if path == '/api/catalog':
             return self.send_json({'types': catalog()})
+        if path == '/api/builder/options':
+            return self.send_json(builder_options())
         if path == '/api/diagram/pending':
             return self.send_json({'pending': diagram_store().list_paused()})
         if path == '/api/diagrams':
@@ -270,6 +272,38 @@ def diagram_reach(data):
     return reach(diagram, _diagram_context(_mode(data)))
 
 
+def builder_options():
+    """What the New agent form can offer on this machine: sites, sensors, NetBox, config files."""
+    assets = read('ssot.json').get('assets', [])
+    out = {**builder.options(),
+           'asset_sites': sorted({a['site'] for a in assets if a.get('site')}),
+           'sensors': [{'id': str(s['id']), 'label': f"{a['name']} · {s['channel']}", 'site': a.get('site', '')}
+                       for a in assets for s in a.get('sensors', [])],
+           'configs': sorted(p.name for p in (ROOT / 'configs').glob('*.cfg')),
+           'netbox': {'configured': bool(os.environ.get('NETBOX_URL') and os.environ.get('NETBOX_TOKEN')), 'sites': [], 'roles': []}}
+    if out['netbox']['configured']:
+        base, auth = os.environ['NETBOX_URL'].rstrip('/'), {'Authorization': f"Token {os.environ['NETBOX_TOKEN']}"}
+        try:
+            for key, path in (('sites', 'dcim/sites'), ('roles', 'dcim/device-roles')):
+                rows = core.http(f'{base}/api/{path}/?limit=200', headers=auth).get('results', [])
+                out['netbox'][key] = [{'slug': r['slug'], 'name': r['name']} for r in rows if r.get('slug')]
+        except ValueError as e:
+            out['netbox']['error'] = str(e)
+    return out
+
+
+def builder_preview(data):
+    """Build the diagram from the form's answers and say what it could touch. Incomplete answers are not an error."""
+    try:
+        doc = builder.build(data.get('spec'))
+    except ValueError as e:
+        return {'problem': str(e)}
+    r = reach(graph.load(doc), _diagram_context('sample'))
+    devices = sorted({d for a in r['agents'] for scope in a['devices'] for d in scope['devices']})
+    scope_errors = [scope['error'] for a in r['agents'] for scope in a['devices'] if scope.get('error')]
+    return {'diagram': doc, 'summary': r['summary'], 'devices': devices, 'scope_errors': scope_errors}
+
+
 def diagram_save(data):
     name = str(data.get('file', ''))
     if not DIAGRAM_FILE.match(name):
@@ -286,7 +320,7 @@ ROUTES = {'/api/assist': assist, '/api/ssot': save_ssot, '/api/run': run_agent, 
           '/api/diagram/validate': diagram_validate, '/api/diagram/run': diagram_run,
           '/api/diagram/approve': diagram_approve, '/api/diagram/save': diagram_save,
           '/api/diagram/eval': diagram_eval, '/api/diagram/export': diagram_export,
-          '/api/diagram/reach': diagram_reach}
+          '/api/diagram/reach': diagram_reach, '/api/builder/preview': builder_preview}
 
 
 if __name__ == '__main__':
