@@ -110,6 +110,20 @@ class RecordTests(unittest.TestCase):
             self.assertEqual(json.loads((Path(tmp) / 'frr1' / 'commands.json').read_text()), ['show bgp summary'])
 
 
+class PlainHttpOptInTests(unittest.TestCase):
+    def test_plain_http_only_to_listed_hosts(self):
+        from bya import core
+        with mock.patch.dict('os.environ', {'BYA_ALLOW_HTTP_HOSTS': ''}):
+            with self.assertRaisesRegex(ValueError, 'BYA_ALLOW_HTTP_HOSTS'):
+                core.http('http://host.orb.internal:11434/v1/models')
+        with mock.patch.dict('os.environ', {'BYA_ALLOW_HTTP_HOSTS': 'host.orb.internal, 10.0.0.5'}), \
+                mock.patch('urllib.request.OpenerDirector.open', side_effect=RuntimeError('reached the network')):
+            with self.assertRaisesRegex(RuntimeError, 'reached the network'):
+                core.http('http://host.orb.internal:11434/v1/models')
+            with self.assertRaisesRegex(ValueError, 'require HTTPS'):
+                core.http('http://other.example:11434/v1/models')
+
+
 class DiagramTests(unittest.TestCase):
     def test_validator_builder_and_reach(self):
         doc = builder.build({'shape': 'ask', 'job': 'Tell me the state of every BGP session in my lab.', 'runbooks': False,
