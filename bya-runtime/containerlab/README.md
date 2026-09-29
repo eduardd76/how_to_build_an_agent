@@ -29,6 +29,9 @@ clab deploy -t bya.clab.yml
 
 On Linux with containerlab installed, use `sudo containerlab deploy -t bya.clab.yml` instead.
 
+The lab uses its own management network, `bya-mgmt` (172.29.29.0/24). If deploy reports that the subnet overlaps an
+existing Docker network, change `ipv4-subnet` in `bya.clab.yml` to a free /24.
+
 Deploying writes `clab-bya/topology-data.json` next to the topology. BYA reads the node names and kinds from it.
 SR Linux takes a minute or two to boot. Check BGP with `./rehearse.sh status` (all sessions `established`).
 

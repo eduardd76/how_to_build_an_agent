@@ -6,6 +6,13 @@
 # Destroy:  sudo containerlab destroy -t bya.clab.yml
 name: bya
 
+# Own management network, so the lab does not collide with the default 172.20.20.0/24 or other Docker networks.
+# If this subnet is taken on your machine too, pick any free /24 (docker network inspect $(docker network ls -q) shows used ones).
+mgmt:
+  network: bya-mgmt
+  ipv4-subnet: 172.29.29.0/24
+  ipv6-subnet: 3fff:172:29:29::/64
+
 topology:
   kinds:
     nokia_srlinux:
