@@ -15,6 +15,7 @@ from bya.core import UTC, date
 from bya.graph import evals
 from bya.graph.catalog import catalog
 from bya.graph.export import export_python
+from bya.graph.reach import reach
 from bya.store import DiagramRunStore, RunStore
 
 ROOT = Path(__file__).resolve().parent
@@ -183,7 +184,8 @@ def _diagram_context(mode):
         monitoring=adapters.PrtgMonitoring(cfg) if mode == 'live' else adapters.SampleMonitoring(),
         approve=None,                  # pause at approval blocks; the reviewer decides in the canvas
         pause_for_tool_approval=True,  # write tools pause the run until approved in the inbox
-        output_dir=ROOT / 'outputs', memory_path=ROOT / 'bya.sqlite3', knowledge_dir=ROOT / 'knowledge')
+        output_dir=ROOT / 'outputs', memory_path=ROOT / 'bya.sqlite3', knowledge_dir=ROOT / 'knowledge',
+        lab_dir=ROOT / 'lab', configs_dir=ROOT / 'configs')
 
 
 def _mode(data):
@@ -263,6 +265,11 @@ def diagram_export(data):
     return {'filename': f'{name[:50]}.py', 'source': export_python(diagram)}
 
 
+def diagram_reach(data):
+    diagram = graph.load(data.get('diagram'))
+    return reach(diagram, _diagram_context(_mode(data)))
+
+
 def diagram_save(data):
     name = str(data.get('file', ''))
     if not DIAGRAM_FILE.match(name):
@@ -278,7 +285,8 @@ def diagram_save(data):
 ROUTES = {'/api/assist': assist, '/api/ssot': save_ssot, '/api/run': run_agent, '/api/approve': approve,
           '/api/diagram/validate': diagram_validate, '/api/diagram/run': diagram_run,
           '/api/diagram/approve': diagram_approve, '/api/diagram/save': diagram_save,
-          '/api/diagram/eval': diagram_eval, '/api/diagram/export': diagram_export}
+          '/api/diagram/eval': diagram_eval, '/api/diagram/export': diagram_export,
+          '/api/diagram/reach': diagram_reach}
 
 
 if __name__ == '__main__':

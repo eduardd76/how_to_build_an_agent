@@ -1,0 +1,2 @@
+Sep 29 06:41:12: %LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet0/1, changed state to up
+Sep 29 06:41:10: %LINK-3-UPDOWN: Interface GigabitEthernet0/1, changed state to up

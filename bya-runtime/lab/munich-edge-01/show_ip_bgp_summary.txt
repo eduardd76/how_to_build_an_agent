@@ -1,0 +1,6 @@
+BGP router identifier 10.255.0.11, local AS number 65011
+BGP table version is 48211, main routing table version 48211
+
+Neighbor        V           AS MsgRcvd MsgSent   TblVer  InQ OutQ Up/Down  State/PfxRcd
+192.0.2.9       4        64500  812334   40221    48211    0    0 3w2d          912
+10.10.0.2       4        65011   40118   40203    48211    0    0 3w2d           14

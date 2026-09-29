@@ -33,6 +33,9 @@ class Context:
         self.runbooks = json.loads((RUNTIME / 'runbooks.json').read_text())
         self.memory_path = memory_path
         self.knowledge_dir = knowledge_dir
+        self.configs_dir = RUNTIME / 'configs'
+        self.lab_dir = RUNTIME / 'lab'
+        self.monitoring = None
 
 
 def trace(state, block_id, detail, **extra):
@@ -57,13 +60,16 @@ def call_tool(state, agent_id, tools, policy, call, approve_tool):
         else:
             try:
                 result = str(tool.call(args))
+            except CommandRefused as e:  # the command filter said no; the agent may try another command
+                result, status = f'Refused by the command filter: {e}', 'dropped'
             except Exception as e:  # the model gets the error and can recover
                 result, status = f'Error: {e}', 'error'
     except (json.JSONDecodeError, ValueError) as e:
         result, status = f'Error: invalid arguments ({e}).', 'error'
     result = result[:8000]
     state['seen_citations'] = sorted(set(state['seen_citations']) | set(guards.RUNBOOK_ID.findall(result)))
-    trace(state, agent_id, f'Tool {name}: {status}', tool=name, status=status)
+    trace(state, agent_id, f'Tool {name}: {status}', tool=name, status=status,
+          **({'args': args} if tool is not None and tool.trace_args else {}))
     return result
 
 
@@ -284,6 +290,7 @@ import time
 from pathlib import Path
 
 from bya import adapters, core, guards
+from bya.graph.devices import CommandRefused
 from bya.graph.diagram import Block
 from bya.graph.executor import SAFETY_SUFFIX
 from bya.graph.memory import MemoryStore
@@ -316,6 +323,7 @@ def run(payload=None, *, mode='sample', approve=None, approve_tool=None, monitor
     monitoring = monitoring or (adapters.SampleMonitoring() if mode == 'sample' else adapters.PrtgMonitoring(
         json.loads((RUNTIME / 'config.local.json').read_text()) if (RUNTIME / 'config.local.json').exists() else {{}}))
     output_dir = output_dir or HERE / 'outputs'
+    ctx.monitoring = monitoring
     state = {{'status': 'running', 'trace': [], 'seen_citations': [], 'violations': [], 'pending': None, 'result': None}}
     memory_writes = []
     try:

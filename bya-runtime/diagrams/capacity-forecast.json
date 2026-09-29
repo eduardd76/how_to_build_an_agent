@@ -1,0 +1,182 @@
+{
+  "schema_version": "1.0",
+  "name": "Capacity forecast",
+  "blocks": [
+    {
+      "id": "start",
+      "type": "trigger.manual",
+      "config": {
+        "default_input": "Forecast Traffic Total on sensor 1001 against 80 % over the next 4 hours."
+      }
+    },
+    {
+      "id": "planner",
+      "type": "agent",
+      "config": {
+        "instructions": "You are a read-only capacity analyst. From the request, take the exact sensor id, threshold and horizon (in 5-minute steps; 4 hours = 48). Call metric_forecast, look up the asset, and fetch the runbooks it maps to. Write a short capacity note: device, service and owner; then the forecast summary exactly as metric_forecast returned it (do not reinterpret its numbers, its threshold crossing or its baseline verdict); then one or two read-only next checks citing runbook ids exactly as returned. This is a metric estimate: never state an outage probability or a root cause. If earlier runs are provided, say whether the trend changed.",
+        "model_url": "http://127.0.0.1:11434/v1",
+        "max_steps": 8,
+        "token_budget": 40000,
+        "timeout_s": 240
+      }
+    },
+    {
+      "id": "tools",
+      "type": "tool.builtin",
+      "config": {
+        "functions": [
+          "metric_forecast",
+          "asset_lookup",
+          "runbook_search"
+        ],
+        "access": "read"
+      }
+    },
+    {
+      "id": "history",
+      "type": "memory.conversation",
+      "config": {
+        "namespace": "capacity",
+        "max_items": 3
+      }
+    },
+    {
+      "id": "check",
+      "type": "guard.output_check",
+      "config": {
+        "allowed_citations": "seen_in_tool_results",
+        "require_citation": false,
+        "block_patterns": []
+      }
+    },
+    {
+      "id": "review",
+      "type": "guard.approval",
+      "config": {
+        "expires_s": 3600
+      }
+    },
+    {
+      "id": "save",
+      "type": "output.file",
+      "config": {
+        "path": "briefs/capacity-forecast.md"
+      }
+    }
+  ],
+  "attachments": [
+    [
+      "planner",
+      "tools"
+    ],
+    [
+      "planner",
+      "history"
+    ]
+  ],
+  "flow": [
+    [
+      "start",
+      "planner"
+    ],
+    [
+      "planner",
+      "check"
+    ],
+    [
+      "check",
+      "review"
+    ],
+    [
+      "review",
+      "save"
+    ]
+  ],
+  "layout": {
+    "start": {
+      "x": 40,
+      "y": 200
+    },
+    "planner": {
+      "x": 300,
+      "y": 200
+    },
+    "tools": {
+      "x": 180,
+      "y": 380
+    },
+    "history": {
+      "x": 420,
+      "y": 380
+    },
+    "check": {
+      "x": 560,
+      "y": 200
+    },
+    "review": {
+      "x": 800,
+      "y": 200
+    },
+    "save": {
+      "x": 1040,
+      "y": 200
+    }
+  },
+  "evals": [
+    {
+      "id": "wan-utilization",
+      "input": "Forecast Traffic Total on sensor 1001 against 80 % over the next 4 hours.",
+      "expect": {
+        "status": "awaiting_approval",
+        "tools_called": [
+          "metric_forecast"
+        ],
+        "contains": [
+          "Network Operations",
+          "baseline"
+        ],
+        "not_contains": [
+          "did not beat",
+          "does not beat",
+          "will cross",
+          "crosses 80",
+          "chance of",
+          "remain above",
+          "above the 80"
+        ]
+      }
+    },
+    {
+      "id": "storage-free-space",
+      "input": "Will free space on sensor 1003 drop below 20 GB in the next 8 hours?",
+      "expect": {
+        "status": "awaiting_approval",
+        "tools_called": [
+          "metric_forecast"
+        ],
+        "contains": [
+          "Platform Operations"
+        ],
+        "not_contains": [
+          "did not beat",
+          "does not beat",
+          "crosses 20"
+        ]
+      }
+    },
+    {
+      "id": "unknown-sensor",
+      "input": "Forecast sensor 9999 against 90 %.",
+      "expect": {
+        "status": "awaiting_approval",
+        "tools_called": [
+          "metric_forecast"
+        ],
+        "not_contains": [
+          "munich-edge-01",
+          "dc-core-02"
+        ]
+      }
+    }
+  ]
+}

@@ -10,7 +10,8 @@ import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import core, validation
+from .. import core, forecasting, validation
+from .devices import DeviceReader
 from .mcp import McpClient
 from .memory import MemoryStore, search_documents
 
@@ -25,6 +26,7 @@ class Tool:
     access: str
     call: object       # function(args: dict) -> str
     block_id: str
+    trace_args: bool = False  # record the arguments in the trace (device commands)
 
     def schema(self):
         return {'type': 'function', 'function': {
@@ -39,6 +41,12 @@ def open_tools(block, ctx):
         return [_http(block)], (lambda: None)
     if block.type == 'tool.mcp':
         return _mcp(block)
+    if block.type == 'tool.device':
+        reader = DeviceReader(block.config, ctx)
+        params = {'type': 'object', 'properties': {'device': {'type': 'string', 'description': 'Exact device name'},
+                                                   'command': {'type': 'string', 'description': 'One read-only command'}},
+                  'required': ['device', 'command']}
+        return [Tool('device_command', reader.description(), params, 'read', reader, block.id, trace_args=True)], (lambda: None)
     if block.type == 'memory.kv':
         return _memory_kv(block, ctx), (lambda: None)
     if block.type == 'memory.documents':
@@ -110,6 +118,12 @@ def time_now(args, ctx):
     return dt.datetime.now(dt.timezone.utc).isoformat()
 
 
+def _stale(asset, ctx):
+    age = (dt.datetime.now(core.UTC) - core.date(asset['verified_at'])).total_seconds()
+    stale = age < -validation.MAX_CLOCK_SKEW or age > validation.MAX_SSOT_AGE
+    return stale and not (asset.get('sample') and ctx.mode == 'sample')  # sample records never go stale in demos
+
+
 def asset_lookup(args, ctx):
     """Exact match only: asset id, asset name, or mapped sensor id. No fuzzy identity."""
     query = str(args.get('query', '')).strip()
@@ -121,9 +135,7 @@ def asset_lookup(args, ctx):
     asset = matches[0]
     if asset.get('sample') and ctx.mode == 'live':
         raise ValueError('This asset is sample data; live runs need reviewed real records.')
-    age = (dt.datetime.now(core.UTC) - core.date(asset['verified_at'])).total_seconds()
-    stale = age < -validation.MAX_CLOCK_SKEW or age > validation.MAX_SSOT_AGE
-    if stale and not (asset.get('sample') and ctx.mode == 'sample'):  # sample records never go stale in demos
+    if _stale(asset, ctx):
         return f'Asset "{asset["name"]}" has a stale or future verification date; ask the owner to reverify it.'
     keep = ('id', 'name', 'site', 'owner', 'service', 'source', 'verified_at', 'runbook_ids', 'sensors')
     return json.dumps({k: asset[k] for k in keep if k in asset})
@@ -137,6 +149,122 @@ def runbook_search(args, ctx):
     return json.dumps(hits[:5]) if hits else 'No matching runbook.'
 
 
+def _sensor(sensor_id, ctx):
+    doc = validation.validate_ssot(ctx.ssot)
+    hits = [(a, s) for a in doc['assets'] for s in a['sensors'] if str(s['id']) == sensor_id]
+    if len(hits) != 1:
+        raise ValueError(f'No unique asset maps sensor "{sensor_id}". Use an exact monitoring sensor id.')
+    asset, sensor = hits[0]
+    if asset.get('sample') and ctx.mode == 'live':
+        raise ValueError('This sensor belongs to sample data; live runs need reviewed real records.')
+    if _stale(asset, ctx):
+        raise ValueError(f'Asset "{asset["name"]}" has a stale or future verification date; ask the owner to reverify it.')
+    return asset, sensor
+
+
+FORECAST_INTERVAL, FORECAST_PERIOD = 300, 288  # 5-minute samples; the seasonal baseline repeats the previous day
+
+
+def metric_forecast(args, ctx):
+    """Forecast one metric from its monitoring history, backtested against a seasonal-naive baseline."""
+    sensor_id = str(args.get('sensor_id', '')).strip()
+    direction = args.get('direction', 'above')
+    if direction not in ('above', 'below'):
+        raise ValueError('"direction" must be "above" or "below".')
+    threshold = float(args['threshold'])
+    horizon = max(1, min(int(args.get('horizon_steps', 48)), 96))
+    asset, sensor = _sensor(sensor_id, ctx)
+    if getattr(ctx, 'monitoring', None) is None:
+        raise ValueError('No monitoring adapter configured.')
+    now = dt.datetime.now(core.UTC)
+    values = validation.series_check(ctx.monitoring.history(sensor, FORECAST_INTERVAL, now), FORECAST_INTERVAL, now)
+    backend = 'demo-trend' if ctx.mode == 'sample' else 'timesfm'  # live never falls back to the demo trend
+    f = forecasting.forecast(values, horizon, threshold, direction, backend, FORECAST_PERIOD)
+    step = f['crossing_step']
+    minutes = horizon * FORECAST_INTERVAL // 60
+    crossing = (f'The forecast crosses {threshold:g} {sensor["unit"]} ({direction}) in {step * FORECAST_INTERVAL // 60} minutes.'
+                if step else f'The forecast does not cross {threshold:g} {sensor["unit"]} within {minutes} minutes.')
+    quality = (f'The forecast beats the seasonal baseline (holdout error {f["mae"]:.3g} vs {f["baseline_mae"]:.3g}).'
+               if f['beats_baseline'] else
+               f'The forecast does NOT beat the seasonal baseline (holdout error {f["mae"]:.3g} vs {f["baseline_mae"]:.3g}); treat it as unreliable.')
+    return json.dumps({
+        'summary': (f'{sensor["channel"]} on {asset["name"]} is {values[-1]:.2f} {sensor["unit"]} now and '
+                    f'{f["point"][-1]:.2f} {sensor["unit"]} in {minutes} minutes. {crossing} {quality}'),
+        'asset': asset['name'], 'service': asset['service'], 'owner': asset['owner'],
+        'channel': sensor['channel'], 'unit': sensor['unit'], 'backend': backend,
+        'latest_value': round(values[-1], 2), 'forecast_end_value': round(f['point'][-1], 2),
+        'horizon_minutes': minutes, 'threshold': threshold, 'direction': direction,
+        'crossing_in_minutes': step * FORECAST_INTERVAL // 60 if step else None,
+        'holdout_mae': round(f['mae'], 3), 'seasonal_baseline_mae': round(f['baseline_mae'], 3),
+        'beats_baseline': f['beats_baseline'], 'runbook_ids': asset.get('runbook_ids', []),
+        'note': ('Metric estimate, not an outage probability. ' + f['interval_note'] + '.'
+                 + ('' if f['beats_baseline'] else ' The model did not beat the seasonal baseline: report it as unreliable.')),
+    })
+
+
+# Configuration rules for IOS-style configs. Each finding names the rule, the line and a masked excerpt.
+MAX_CONFIG = 500_000
+SECRET_AFTER = re.compile(r'(?i)\b(password|secret|community|key|key-string)(\s+\d)?\s+\S+')
+LINE_RULES = [
+    ('CFG-MGMT-01', 'high', 'Telnet allowed on VTY lines', 'transport input ssh on every VTY line',
+     re.compile(r'^\s*transport input .*\b(telnet|all)\b', re.I)),
+    ('CFG-MGMT-02', 'medium', 'Plain HTTP management server enabled', 'no ip http server',
+     re.compile(r'^\s*ip http server\s*$', re.I)),
+    ('CFG-SNMP-01', 'high', 'Default SNMP community string', 'remove the community; use SNMPv3 with auth and priv',
+     re.compile(r'^\s*snmp-server community (public|private)\b', re.I)),
+    ('CFG-SNMP-02', 'high', 'SNMP read-write community', 'remove read-write communities',
+     re.compile(r'^\s*snmp-server community \S+ RW\b', re.I)),
+    ('CFG-AUTH-02', 'high', 'Enable password instead of enable secret', 'replace enable password with enable secret (type 9)',
+     re.compile(r'^\s*enable password\b', re.I)),
+    ('CFG-AUTH-03', 'medium', 'Local user with a reversible password', 'use username NAME secret (type 9) instead of password',
+     re.compile(r'^\s*username \S+ (privilege \d+ )?password\b', re.I)),
+    ('CFG-ACL-01', 'high', 'ACL permits any source to any destination', 'permit only required traffic; end with a logged deny',
+     re.compile(r'^\s*(\d+\s+)?(access-list \d+ )?permit ip any any\b', re.I)),
+]
+ABSENT_RULES = [
+    ('CFG-AUTH-01', 'medium', 'Password encryption service not enabled', 'service password-encryption',
+     re.compile(r'^\s*service password-encryption\b', re.I | re.M)),
+    ('CFG-LOG-01', 'low', 'No remote syslog server', 'logging host <collector>', re.compile(r'^\s*logging (host )?\d', re.I | re.M)),
+    ('CFG-NTP-01', 'low', 'No NTP server', 'ntp server <server>', re.compile(r'^\s*ntp server\b', re.I | re.M)),
+]
+
+
+def config_files_dir(ctx):
+    return Path(getattr(ctx, 'configs_dir', None) or Path(ctx.knowledge_dir).parent / 'configs')
+
+
+def config_lint(args, ctx):
+    """Check one config file from the configs folder against the rules. Read-only; secrets are masked.
+    Returns a ready-made report so the model repeats the findings instead of re-deriving them."""
+    name = str(args.get('file') or '').strip()
+    if not name:
+        raise ValueError('Give the config "file" name from the configs folder.')
+    base = config_files_dir(ctx).resolve()
+    path = (base / name.removeprefix('configs/')).resolve()
+    if not path.is_relative_to(base) or not path.is_file():
+        return f'No config file "{name}" in the configs folder.'
+    if path.stat().st_size > MAX_CONFIG:
+        raise ValueError(f'Config is larger than {MAX_CONFIG} bytes.')
+    lines = path.read_text(errors='replace').splitlines()
+    findings = []
+    for n, line in enumerate(lines, 1):
+        if line.lstrip().startswith('!'):
+            continue  # comments never trigger or suppress rules
+        for rule, severity, title, fix, rx in LINE_RULES:
+            if rx.search(line):
+                excerpt = SECRET_AFTER.sub(lambda m: f'{m.group(1)} ****', line.strip())[:120]
+                findings.append({'rule': rule, 'severity': severity, 'title': title, 'line': n, 'excerpt': excerpt, 'fix': fix})
+    active = '\n'.join(l for l in lines if not l.lstrip().startswith('!'))
+    findings += [{'rule': rule, 'severity': severity, 'title': title, 'line': None, 'excerpt': 'not configured', 'fix': fix}
+                 for rule, severity, title, fix, rx in ABSENT_RULES if not rx.search(active)]
+    order = {'high': 0, 'medium': 1, 'low': 2}
+    findings.sort(key=lambda f: (order[f['severity']], f['line'] or 10**9))
+    report = [f"- [{f['severity']}] {f['rule']}{' line ' + str(f['line']) if f['line'] else ''}: {f['title']}. Fix: {f['fix']}."
+              for f in findings] or ['No findings against the configuration rules.']
+    return json.dumps({'file': name, 'lines': len(lines), 'finding_count': len(findings),
+                       'report': '\n'.join(report), 'findings': findings,
+                       'rules_checked': len(LINE_RULES) + len(ABSENT_RULES)})
+
 BUILTINS = {
     'calculator': (calculator, 'Evaluate an arithmetic expression. Use for any maths.',
                    {'type': 'object', 'properties': {'expression': {'type': 'string'}}, 'required': ['expression']}),
@@ -148,6 +276,16 @@ BUILTINS = {
                                        'Cite runbook ids exactly as returned.',
                        {'type': 'object', 'properties': {'ids': {'type': 'array', 'items': {'type': 'string'}},
                                                          'query': {'type': 'string'}}}),
+    'metric_forecast': (metric_forecast, 'Forecast one monitored metric by exact sensor id: when it may cross a '
+                                         'threshold, backtested against a seasonal baseline. Read-only.',
+                        {'type': 'object', 'properties': {
+                            'sensor_id': {'type': 'string'}, 'threshold': {'type': 'number'},
+                            'direction': {'type': 'string', 'enum': ['above', 'below']},
+                            'horizon_steps': {'type': 'integer', 'description': '5-minute steps, 1-96 (default 48)'}},
+                         'required': ['sensor_id', 'threshold']}),
+    'config_lint': (config_lint, 'Check one device configuration file from the configs folder against the '
+                                 'configuration rules. Returns a report with rule ids, lines and fixes.',
+                    {'type': 'object', 'properties': {'file': {'type': 'string'}}, 'required': ['file']}),
 }
 
 
