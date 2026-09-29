@@ -39,6 +39,8 @@ The model still never chooses steps, calls tools or picks recipients. Deliberate
 
 An agent can be described as a **diagram**: blocks, **attachments** (resources an agent may use) and **flow wires** (what happens in order). The runtime validates the diagram, then runs it.
 
+**New agent** in the studio starts from the job, not the canvas: the engineer picks the kind of job (investigate an alert, regular report, review before a change, answer when asked), writes it in one sentence, and ticks what the agent may read and where the result goes. `bya/graph/builder.py` turns those answers into a diagram by fixed rules (no model involved): output check, approval and limits always included, instructions drafted from the sentence, and three starter eval cases. `POST /api/builder/preview` returns the diagram and its reach while the form is filled in.
+
 **Diagram Studio** (`http://127.0.0.1:8787/studio.html`, or **Diagram studio** in the left menu) is the canvas for this:
 - Add blocks from the palette by clicking or dragging.
 - Drag from a block's right-hand port to create a flow wire, or from an agent's bottom port to attach a tool.

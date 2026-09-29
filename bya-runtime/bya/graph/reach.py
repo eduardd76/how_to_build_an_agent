@@ -4,6 +4,7 @@ Per agent: the model endpoint, what it can read, the devices and commands it can
 (each change needs approval), and where approved output goes. No block grants a device configuration
 session, so "device_config_paths" is always 0; it is reported so a reviewer can see it.
 """
+import os
 from urllib.parse import urlsplit
 
 from .devices import describe_scope
@@ -16,7 +17,8 @@ def reach(diagram, ctx):
     agents = []
     for agent in diagram.of_category('agent'):
         cfg = agent.config
-        host = urlsplit(str(cfg.get('model_url', ''))).hostname or ''
+        url = cfg.get('model_url') or os.environ.get('LLM_BASE_URL', 'http://127.0.0.1:11434/v1')  # as ChatModel resolves it
+        host = urlsplit(str(url)).hostname or ''
         entry = {'agent': agent.id, 'model': cfg.get('model') or '(LLM_MODEL)',
                  'model_location': 'local' if host in LOCAL_HOSTS else f'remote: {host}',
                  'read': [], 'change': [], 'devices': [], 'memory': [], 'limits': {}}

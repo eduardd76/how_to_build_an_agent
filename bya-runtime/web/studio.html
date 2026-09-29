@@ -18,7 +18,7 @@
     <div class="bar-actions">
       <label class="sr-only" for="template">Start from</label>
       <select id="template"><option value="">Start from…</option></select>
-      <button class="btn" id="new">New</button>
+      <button class="btn primary" id="new">New agent</button>
       <label class="btn file-btn">Import<input type="file" id="import" accept="application/json,.json"></label>
       <button class="btn" id="export">Export</button>
       <button class="btn" id="save">Save</button>
@@ -83,6 +83,8 @@
 <section class="inbox-panel" id="inbox-panel" aria-label="Approval inbox" hidden></section>
 <section class="inbox-panel evals-panel" id="evals-panel" aria-label="Evals" hidden></section>
 <section class="inbox-panel reach-panel" id="reach-panel" aria-label="Reach" hidden></section>
+<section class="inbox-panel review-panel" id="review-panel" aria-label="Your new agent" hidden></section>
+<div class="builder" id="builder" role="dialog" aria-modal="true" aria-label="New agent" hidden></div>
 <div id="toast" role="status" aria-live="polite" hidden></div>
 </body>
 </html>
